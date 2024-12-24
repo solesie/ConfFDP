@@ -205,6 +205,9 @@ static uint16_t nvme_del_cq(FemuCtrl *n, NvmeCmd *cmd)
     return NVME_SUCCESS;
 }
 
+/**
+ * solesie: Updating Controller Doorbell Properties using a Shadow Doorbell Buffer
+ */
 static uint16_t nvme_set_db_memory(FemuCtrl *n, const NvmeCmd *cmd)
 {
     uint64_t dbs_addr = le64_to_cpu(cmd->dptr.prp1);

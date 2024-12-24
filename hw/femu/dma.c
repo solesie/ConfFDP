@@ -109,6 +109,9 @@ unmap:
     return NVME_INVALID_FIELD | NVME_DNR;
 }
 
+/**
+ * solesie: copy data from prp
+ */
 uint16_t dma_write_prp(FemuCtrl *n, uint8_t *ptr, uint32_t len, uint64_t prp1,
                        uint64_t prp2)
 {
@@ -134,6 +137,9 @@ uint16_t dma_write_prp(FemuCtrl *n, uint8_t *ptr, uint32_t len, uint64_t prp1,
     return status;
 }
 
+/**
+ * solesie: move data to prp
+ */
 uint16_t dma_read_prp(FemuCtrl *n, uint8_t *ptr, uint32_t len, uint64_t prp1,
                       uint64_t prp2)
 {

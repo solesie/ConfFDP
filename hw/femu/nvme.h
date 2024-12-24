@@ -51,20 +51,29 @@ typedef struct _PCIe_Gen3_x4 {
     bool busy;
 }PCIe_Gen3_x4; //FOR real zns
 
+
+
+/**
+ * solesie: Controller Properties start
+ */
+
+/**
+ * solesie: Controller Properties
+ */
 typedef struct NvmeBar {
-    uint64_t    cap;
-    uint32_t    vs;
-    uint32_t    intms;
-    uint32_t    intmc;
-    uint32_t    cc;
-    uint32_t    rsvd1;
-    uint32_t    csts;
-    uint32_t    nssrc;
-    uint32_t    aqa;
-    uint64_t    asq;
-    uint64_t    acq;
-    uint32_t    cmbloc;
-    uint32_t    cmbsz;
+	uint64_t    cap;        // Controller Capabilities
+	uint32_t    vs;         // Version
+	uint32_t    intms;      // Interrupt Mask Set
+	uint32_t    intmc;      // Interrupt Mask Clear
+	uint32_t    cc;         // Controller Configuration
+	uint32_t    rsvd1;      // reserved
+	uint32_t    csts;       // Controller Status
+	uint32_t    nssrc;		// NVM Subsystem Reset Control
+	uint32_t    aqa;        // Admin Queue Attributes
+	uint64_t    asq;        // Admin Submission Queue Base Address
+	uint64_t    acq;        // Admin Completion Queue Base Address
+	uint32_t    cmbloc; 	// Controller Memory Buffer Location
+	uint32_t    cmbsz; 		// Controller Memory Buffer Size
 } NvmeBar;
 
 enum NvmeCapShift {
@@ -104,16 +113,19 @@ enum NvmeCapMask {
 #define NVME_TEMPERATURE        0x143
 #define NVME_OP_ABORTED         0xff
 
-#define NVME_CAP_MQES(cap)  (((cap) >> CAP_MQES_SHIFT)   & CAP_MQES_MASK)
-#define NVME_CAP_CQR(cap)   (((cap) >> CAP_CQR_SHIFT)    & CAP_CQR_MASK)
-#define NVME_CAP_AMS(cap)   (((cap) >> CAP_AMS_SHIFT)    & CAP_AMS_MASK)
-#define NVME_CAP_TO(cap)    (((cap) >> CAP_TO_SHIFT)     & CAP_TO_MASK)
-#define NVME_CAP_DSTRD(cap) (((cap) >> CAP_DSTRD_SHIFT)  & CAP_DSTRD_MASK)
-#define NVME_CAP_NSSRS(cap) (((cap) >> CAP_NSSRS_SHIFT)  & CAP_NSSRS_MASK)
-#define NVME_CAP_CSS(cap)   (((cap) >> CAP_CSS_SHIFT)    & CAP_CSS_MASK)
+/**
+ * solesie: Define macros for NvmeBar.cap 64bit format
+ */
+#define NVME_CAP_MQES(cap)  (((cap) >> CAP_MQES_SHIFT)   & CAP_MQES_MASK)   // Maximum Queue Entries Supported
+#define NVME_CAP_CQR(cap)   (((cap) >> CAP_CQR_SHIFT)    & CAP_CQR_MASK)    // Contiguous Queues Required
+#define NVME_CAP_AMS(cap)   (((cap) >> CAP_AMS_SHIFT)    & CAP_AMS_MASK)    // Arbitration Mechanism Supported
+#define NVME_CAP_TO(cap)    (((cap) >> CAP_TO_SHIFT)     & CAP_TO_MASK)     // Timeout
+#define NVME_CAP_DSTRD(cap) (((cap) >> CAP_DSTRD_SHIFT)  & CAP_DSTRD_MASK)  // Doorbell Stride
+#define NVME_CAP_NSSRS(cap) (((cap) >> CAP_NSSRS_SHIFT)  & CAP_NSSRS_MASK)  // NVM Subsystem Reset Supported
+#define NVME_CAP_CSS(cap)   (((cap) >> CAP_CSS_SHIFT)    & CAP_CSS_MASK)    // Command Sets Supported
 #define NVME_CAP_OC12(cap)  (((cap) >> CAP_Oc12SHIFT) & CAP_Oc12MASK)
-#define NVME_CAP_MPSMIN(cap)(((cap) >> CAP_MPSMIN_SHIFT) & CAP_MPSMIN_MASK)
-#define NVME_CAP_MPSMAX(cap)(((cap) >> CAP_MPSMAX_SHIFT) & CAP_MPSMAX_MASK)
+#define NVME_CAP_MPSMIN(cap)(((cap) >> CAP_MPSMIN_SHIFT) & CAP_MPSMIN_MASK) // Memory Page Size Minimum
+#define NVME_CAP_MPSMAX(cap)(((cap) >> CAP_MPSMAX_SHIFT) & CAP_MPSMAX_MASK) // Memory Page Size Maximum
 
 #define NVME_CAP_SET_MQES(cap, val)   (cap |= (uint64_t)(val & CAP_MQES_MASK)  \
                                                            << CAP_MQES_SHIFT)
@@ -135,6 +147,11 @@ enum NvmeCapMask {
                                                            << CAP_MPSMIN_SHIFT)
 #define NVME_CAP_SET_MPSMAX(cap, val) (cap |= (uint64_t)(val & CAP_MPSMAX_MASK)\
                                                             << CAP_MPSMAX_SHIFT)
+
+/**
+ * solesie: Command Set Identifier. 
+ * This field is CNS(Controller or Namespace Structure, Identity command) value specific.
+ */
 enum NvmeCsi {
     NVME_CSI_NVM                = 0x00,
     NVME_CSI_ZONED              = 0x02,
@@ -166,13 +183,16 @@ enum NvmeCcMask {
     CC_IOCQES_MASK  = 0xf,
 };
 
-#define NVME_CC_EN(cc)     ((cc >> CC_EN_SHIFT)     & CC_EN_MASK)
-#define NVME_CC_CSS(cc)    ((cc >> CC_CSS_SHIFT)    & CC_CSS_MASK)
-#define NVME_CC_MPS(cc)    ((cc >> CC_MPS_SHIFT)    & CC_MPS_MASK)
-#define NVME_CC_AMS(cc)    ((cc >> CC_AMS_SHIFT)    & CC_AMS_MASK)
-#define NVME_CC_SHN(cc)    ((cc >> CC_SHN_SHIFT)    & CC_SHN_MASK)
-#define NVME_CC_IOSQES(cc) ((cc >> CC_IOSQES_SHIFT) & CC_IOSQES_MASK)
-#define NVME_CC_IOCQES(cc) ((cc >> CC_IOCQES_SHIFT) & CC_IOCQES_MASK)
+/**
+ * solesie: Define macros for NvmeBar.cc 32bit format
+ */
+#define NVME_CC_EN(cc)     ((cc >> CC_EN_SHIFT)     & CC_EN_MASK)       // Enable
+#define NVME_CC_CSS(cc)    ((cc >> CC_CSS_SHIFT)    & CC_CSS_MASK)      // I/O Command Set Selected
+#define NVME_CC_MPS(cc)    ((cc >> CC_MPS_SHIFT)    & CC_MPS_MASK)      // Memory Page Size
+#define NVME_CC_AMS(cc)    ((cc >> CC_AMS_SHIFT)    & CC_AMS_MASK)      // Arbitration Mechanism Selected
+#define NVME_CC_SHN(cc)    ((cc >> CC_SHN_SHIFT)    & CC_SHN_MASK)      // Shutdown Notification
+#define NVME_CC_IOSQES(cc) ((cc >> CC_IOSQES_SHIFT) & CC_IOSQES_MASK)   // I/O Submission Queue Entry Size
+#define NVME_CC_IOCQES(cc) ((cc >> CC_IOCQES_SHIFT) & CC_IOCQES_MASK)   // I/O Completion Queue Entry Size (IOCQES)
 
 enum NvmeCcCss {
     NVME_CC_CSS_NVM        = 0x0,
@@ -198,15 +218,19 @@ enum NvmeCsts {
     NVME_CSTS_READY         = 1 << CSTS_RDY_SHIFT,
     NVME_CSTS_FAILED        = 1 << CSTS_CFS_SHIFT,
     NVME_CSTS_SHST_NORMAL   = 0 << CSTS_SHST_SHIFT,
-    NVME_CSTS_SHST_PROGRESS = 1 << CSTS_SHST_SHIFT,
+    NVME_CSTS_SHST_PROGRESS = 1 << CSTS_SHST_SHIFT,     
     NVME_CSTS_SHST_COMPLETE = 2 << CSTS_SHST_SHIFT,
     NVME_CSTS_NSSRO         = 1 << CSTS_NSSRO_SHIFT,
 };
 
-#define NVME_CSTS_RDY(csts)     ((csts >> CSTS_RDY_SHIFT)   & CSTS_RDY_MASK)
-#define NVME_CSTS_CFS(csts)     ((csts >> CSTS_CFS_SHIFT)   & CSTS_CFS_MASK)
-#define NVME_CSTS_SHST(csts)    ((csts >> CSTS_SHST_SHIFT)  & CSTS_SHST_MASK)
-#define NVME_CSTS_NSSRO(csts)   ((csts >> CSTS_NSSRO_SHIFT) & CSTS_NSSRO_MASK)
+/**
+ * solesie: Define macros for NvmeBar.csts 32bit format.
+ * Processing Paused (PP), Shutdown Type (ST) are not implemented now.
+ */
+#define NVME_CSTS_RDY(csts)     ((csts >> CSTS_RDY_SHIFT)   & CSTS_RDY_MASK)    // Ready
+#define NVME_CSTS_CFS(csts)     ((csts >> CSTS_CFS_SHIFT)   & CSTS_CFS_MASK)    // Controller Fatal Status
+#define NVME_CSTS_SHST(csts)    ((csts >> CSTS_SHST_SHIFT)  & CSTS_SHST_MASK)   // Shutdown Status
+#define NVME_CSTS_NSSRO(csts)   ((csts >> CSTS_NSSRO_SHIFT) & CSTS_NSSRO_MASK)  // NVM Subsystem Reset Occurred
 
 enum NvmeAqaShift {
     AQA_ASQS_SHIFT  = 0,
@@ -218,8 +242,11 @@ enum NvmeAqaMask {
     AQA_ACQS_MASK   = 0xfff,
 };
 
-#define NVME_AQA_ASQS(aqa) ((aqa >> AQA_ASQS_SHIFT) & AQA_ASQS_MASK)
-#define NVME_AQA_ACQS(aqa) ((aqa >> AQA_ACQS_SHIFT) & AQA_ACQS_MASK)
+/**
+ * solesie: Define macros for NvmeBar.aqa 32bit format.
+ */
+#define NVME_AQA_ASQS(aqa) ((aqa >> AQA_ASQS_SHIFT) & AQA_ASQS_MASK)    // Admin Submission Queue Size
+#define NVME_AQA_ACQS(aqa) ((aqa >> AQA_ACQS_SHIFT) & AQA_ACQS_MASK)    // Admin Completion Queue Size
 
 enum NvmeCmblocShift {
     CMBLOC_BIR_SHIFT  = 0,
@@ -231,13 +258,17 @@ enum NvmeCmblocMask {
     CMBLOC_OFST_MASK = 0xfffff,
 };
 
-#define NVME_CMBLOC_BIR(cmbloc) ((cmbloc >> CMBLOC_BIR_SHIFT)  & CMBLOC_BIR_MASK)
-#define NVME_CMBLOC_OFST(cmbloc)((cmbloc >> CMBLOC_OFST_SHIFT) & CMBLOC_OFST_MASK)
+/**
+ * solesie: Define macros for NvmeBar.CMBLOC 32bit format.
+ */
+#define NVME_CMBLOC_BIR(cmbloc) ((cmbloc >> CMBLOC_BIR_SHIFT)  & CMBLOC_BIR_MASK)           // Base Indicator Register
+#define NVME_CMBLOC_OFST(cmbloc)((cmbloc >> CMBLOC_OFST_SHIFT) & CMBLOC_OFST_MASK)          // Offset
 
 #define NVME_CMBLOC_SET_BIR(cmbloc, val)   (cmbloc |= (uint64_t)(val & CMBLOC_BIR_MASK)  \
                                                                    << CMBLOC_BIR_SHIFT)
 #define NVME_CMBLOC_SET_OFST(cmbloc, val)  (cmbloc |= (uint64_t)(val & CMBLOC_OFST_MASK)  \
                                                                    << CMBLOC_OFST_SHIFT)
+
 enum NvmeCmbszShift {
     CMBSZ_SQS_SHIFT   = 0,
     CMBSZ_CQS_SHIFT   = 1,
@@ -258,13 +289,17 @@ enum NvmeCmbszMask {
     CMBSZ_SZ_MASK    = 0xfffff,
 };
 
-#define NVME_CMBSZ_SQS(cmbsz)  ((cmbsz >> CMBSZ_SQS_SHIFT)   & CMBSZ_SQS_MASK)
-#define NVME_CMBSZ_CQS(cmbsz)  ((cmbsz >> CMBSZ_CQS_SHIFT)   & CMBSZ_CQS_MASK)
-#define NVME_CMBSZ_LISTS(cmbsz)((cmbsz >> CMBSZ_LISTS_SHIFT) & CMBSZ_LISTS_MASK)
-#define NVME_CMBSZ_RDS(cmbsz)  ((cmbsz >> CMBSZ_RDS_SHIFT)   & CMBSZ_RDS_MASK)
-#define NVME_CMBSZ_WDS(cmbsz)  ((cmbsz >> CMBSZ_WDS_SHIFT)   & CMBSZ_WDS_MASK)
-#define NVME_CMBSZ_SZU(cmbsz)  ((cmbsz >> CMBSZ_SZU_SHIFT)   & CMBSZ_SZU_MASK)
-#define NVME_CMBSZ_SZ(cmbsz)   ((cmbsz >> CMBSZ_SZ_SHIFT)    & CMBSZ_SZ_MASK)
+/**
+ * solesie: Define macros for NvmeBar.CMBSZ 32bit format.
+ * Maybe not use in FEMU.
+ */
+#define NVME_CMBSZ_SQS(cmbsz)  ((cmbsz >> CMBSZ_SQS_SHIFT)   & CMBSZ_SQS_MASK)      // Submission Queue Support
+#define NVME_CMBSZ_CQS(cmbsz)  ((cmbsz >> CMBSZ_CQS_SHIFT)   & CMBSZ_CQS_MASK)      // Completion Queue Support
+#define NVME_CMBSZ_LISTS(cmbsz)((cmbsz >> CMBSZ_LISTS_SHIFT) & CMBSZ_LISTS_MASK)    // PRP SGL List Support
+#define NVME_CMBSZ_RDS(cmbsz)  ((cmbsz >> CMBSZ_RDS_SHIFT)   & CMBSZ_RDS_MASK)      // Read Data Support
+#define NVME_CMBSZ_WDS(cmbsz)  ((cmbsz >> CMBSZ_WDS_SHIFT)   & CMBSZ_WDS_MASK)      // Write Data Support
+#define NVME_CMBSZ_SZU(cmbsz)  ((cmbsz >> CMBSZ_SZU_SHIFT)   & CMBSZ_SZU_MASK)      // Size Units
+#define NVME_CMBSZ_SZ(cmbsz)   ((cmbsz >> CMBSZ_SZ_SHIFT)    & CMBSZ_SZ_MASK)       // Size
 
 #define NVME_CMBSZ_SET_SQS(cmbsz, val)   (cmbsz |= (uint64_t)(val & CMBSZ_SQS_MASK)  \
                                                                 << CMBSZ_SQS_SHIFT)
@@ -283,6 +318,19 @@ enum NvmeCmbszMask {
 
 #define NVME_CMBSZ_GETSIZE(cmbsz) (NVME_CMBSZ_SZ(cmbsz) * (1<<(12+4*NVME_CMBSZ_SZU(cmbsz))))
 
+/**
+ * solesie: Controller Properties end
+ */
+
+
+
+/**
+ * solesie: SQE, CQE Data Structures start
+ */
+
+/**
+ * solesie: SGL Data Block Descriptor 16bytes format.
+ */
 typedef struct QEMU_PACKED NvmeSglDescriptor {
     uint64_t addr;
     uint32_t len;
@@ -293,6 +341,9 @@ typedef struct QEMU_PACKED NvmeSglDescriptor {
 #define NVME_SGL_TYPE(type)     ((type >> 4) & 0xf)
 #define NVME_SGL_SUBTYPE(type)  (type & 0xf)
 
+/**
+ * solesie: DPTR of Common Command Format
+ */
 typedef union NvmeCmdDptr {
     struct {
         uint64_t    prp1;
@@ -302,6 +353,9 @@ typedef union NvmeCmdDptr {
     NvmeSglDescriptor sgl;
 } NvmeCmdDptr;
 
+/**
+ * solesie: PRP or SGL for Data Transfer
+ */
 enum NvmePsdt {
     NVME_PSDT_PRP                 = 0x0,
     NVME_PSDT_SGL_MPTR_CONTIGUOUS = 0x1,
@@ -344,15 +398,18 @@ typedef struct nvme_passthru_cmd {
 	uint32_t	result;
 }nvme_passthru_cmd;
 
+/**
+ * solesie: Common Command Format
+ */
 typedef struct NvmeCmd {
-    uint16_t    opcode : 8; //	uint8_t	opcode;//	uint8_t	flags;
-    uint16_t    fuse   : 2; //	uint16_t	rsvd1;
-    uint16_t    res1   : 4; //	uint32_t	nsid;
-    uint16_t    psdt   : 2; //	uint32_t	nsid;
-    uint16_t    cid;        //	uint32_t	cdw2;
-    uint32_t    nsid;       //	uint32_t	cdw2;	uint32_t	cdw3;
-    uint64_t    res2;       //	uint32_t	cdw3;	uint64_t	metadata;
-    uint64_t    mptr;       //	uint64_t	metadata; 	uint64_t	addr;
+    uint16_t    opcode : 8;     // Common Dword 0
+    uint16_t    fuse   : 2;     // cdw 0
+    uint16_t    res1   : 4;     // cdw 0
+    uint16_t    psdt   : 2;     // cdw 0
+    uint16_t    cid;            // Command Identifier of cdw 0
+    uint32_t    nsid;
+    uint64_t    res2;
+    uint64_t    mptr;
     NvmeCmdDptr dptr;
     uint32_t    cdw10;
     uint32_t    cdw11;
@@ -362,11 +419,12 @@ typedef struct NvmeCmd {
     uint32_t    cdw15;
 } NvmeCmd;
 
-
-
 #define NVME_CMD_FLAGS_FUSE(flags) (flags & 0x3)
 #define NVME_CMD_FLAGS_PSDT(flags) ((flags >> 6) & 0x3)
 
+/**
+ * solesie: Opcodes for Admin Commands
+ */
 enum NvmeAdminCommands {
     NVME_ADM_CMD_DELETE_SQ      = 0x00,
     NVME_ADM_CMD_CREATE_SQ      = 0x01,
@@ -380,15 +438,23 @@ enum NvmeAdminCommands {
     NVME_ADM_CMD_ASYNC_EV_REQ   = 0x0c,
     NVME_ADM_CMD_ACTIVATE_FW    = 0x10,
     NVME_ADM_CMD_DOWNLOAD_FW    = 0x11,
+    NVME_ADM_CMD_SET_DB_MEMORY  = 0x7c,     // solesie: Doorbell Buffer Config
     NVME_ADM_CMD_FORMAT_NVM     = 0x80,
     NVME_ADM_CMD_SECURITY_SEND  = 0x81,
     NVME_ADM_CMD_SECURITY_RECV  = 0x82,
-    NVME_ADM_CMD_SET_DB_MEMORY  = 0x7c,
+
     NVME_ADM_CMD_CONF_DEBUG     = 0xec,
     NVME_ADM_CMD_FEMU_DEBUG     = 0xee,
     NVME_ADM_CMD_FEMU_FLIP      = 0xef,
+
+    NVME_ADM_CMD_NS_MGMT        = 0x0d,     // solesie: TODO: Not implemented in FEMU.
+    NVME_AMD_CMD_NS_ATTACH      = 0x15,     // solesie: TODO: Not implemented in FEMU.
+    NVME_ADM_CMD_CAPA_MANAGE    = 0x20,     // solesie: TODO: Not implemented in FEMU.
 };
 
+/**
+ * solesie: Opcodes for IO Commands
+ */
 enum NvmeIoCommands {
     NVME_CMD_FLUSH              = 0x00,
     NVME_CMD_WRITE              = 0x01,
@@ -396,25 +462,34 @@ enum NvmeIoCommands {
     NVME_CMD_WRITE_UNCOR        = 0x04,
     NVME_CMD_COMPARE            = 0x05,
     NVME_CMD_WRITE_ZEROES       = 0x08,
-    NVME_CMD_DSM                = 0x09,
+    NVME_CMD_DSM                = 0x09,     // Dataset Management
     NVME_CMD_ZONE_MGMT_SEND     = 0x79,
     NVME_CMD_ZONE_MGMT_RECV     = 0x7a,
     NVME_CMD_ZONE_APPEND        = 0x7d,
     NVME_CMD_OC_ERASE           = 0x90,
     NVME_CMD_OC_WRITE           = 0x91,
     NVME_CMD_OC_READ            = 0x92,
+
+    NVME_CMD_IO_MGMT_SEND       = 0x1d,     // solesie: TODO: Not implemented in FEMU.
+    NVME_CMD_IO_MGMT_SEND       = 0x12      // solesie: TODO: Not implemented in FEMU.
 };
 
+/**
+ * solesie: Delete SQ/CQ Command format (Admin Command)
+ */
 typedef struct NvmeDeleteQ {
     uint8_t     opcode;
     uint8_t     flags;
     uint16_t    cid;
     uint32_t    rsvd1[9];
-    uint16_t    qid;
+    uint16_t    qid;        // Queue Identifier
     uint16_t    rsvd10;
     uint32_t    rsvd11[5];
 } NvmeDeleteQ;
 
+/**
+ * solesie: Create CQ Command format (Admin Command)
+ */
 typedef struct NvmeCreateCq {
     uint8_t     opcode;
     uint8_t     flags;
@@ -422,16 +497,19 @@ typedef struct NvmeCreateCq {
     uint32_t    rsvd1[5];
     uint64_t    prp1;
     uint64_t    rsvd8;
-    uint16_t    cqid;
-    uint16_t    qsize;
-    uint16_t    cq_flags;
-    uint16_t    irq_vector;
+    uint16_t    cqid;       // Queue Identifier
+    uint16_t    qsize;      // Queue Size
+    uint16_t    cq_flags;   // Interrupts Enabled (IEN) and Physically Contiguous (PC) of Dword 11
+    uint16_t    irq_vector; // Interrupt Vector (IV)
     uint32_t    rsvd12[4];
 } NvmeCreateCq;
 
 #define NVME_CQ_FLAGS_PC(cq_flags)  (cq_flags & 0x1)
 #define NVME_CQ_FLAGS_IEN(cq_flags) ((cq_flags >> 1) & 0x1)
 
+/**
+ * solesie: Create SQ Command format (Admin Command)
+ */
 typedef struct NvmeCreateSq {
     uint8_t     opcode;
     uint8_t     flags;
@@ -441,7 +519,7 @@ typedef struct NvmeCreateSq {
     uint64_t    rsvd8;
     uint16_t    sqid;
     uint16_t    qsize;
-    uint16_t    sq_flags;
+    uint16_t    sq_flags;   // Queue Priority (QPRIO) and Physically Contiguous (PC) of Dword 11
     uint16_t    cqid;
     uint32_t    rsvd12[4];
 } NvmeCreateSq;
@@ -449,6 +527,9 @@ typedef struct NvmeCreateSq {
 #define NVME_SQ_FLAGS_PC(sq_flags)      (sq_flags & 0x1)
 #define NVME_SQ_FLAGS_QPRIO(sq_flags)   ((sq_flags >> 1) & 0x3)
 
+/**
+ * solesie: NVMeCreateSq.sq_flags.
+ */
 enum NvmeQueueFlags {
     NVME_Q_PC           = 1,
     NVME_Q_PRIO_URGENT  = 0,
@@ -457,6 +538,9 @@ enum NvmeQueueFlags {
     NVME_Q_PRIO_LOW     = 3,
 };
 
+/**
+ * solesie: Identify Command format (Admin Command)
+ */
 typedef struct NvmeIdentity {
     uint8_t     opcode;
     uint8_t     flags;
@@ -465,13 +549,18 @@ typedef struct NvmeIdentity {
     uint64_t    rsvd2[2];
     uint64_t    prp1;
     uint64_t    prp2;
-    uint32_t    cns;
-    uint16_t    nvmsetid;
+    uint32_t    cns;        // Controller or Namespace Structure
+    uint16_t    nvmsetid;   // CNS Specific Identifier (CNSSID)
     uint8_t     rsvd11;
-    uint8_t     csi;
+    uint8_t     csi;        // Command Set Identifier
     uint32_t    rsvd12[4];
 } NvmeIdentify;
 
+/**
+ * solesie: TODO: Following needs to be considered to support FDP and NS.
+ * 1. Whether to apply NS end to end protection(LBTU, PRINFO, apptag, appmask ...)
+ * 2. How to implement control.CETYPE to apply FDP
+ */
 typedef struct NvmeRwCmd {
     uint8_t     opcode;
     uint8_t     flags;
@@ -490,9 +579,13 @@ typedef struct NvmeRwCmd {
     uint16_t    appmask;
 } NvmeRwCmd;
 
+/**
+ * solesie: NvmeRwCmd has various formats depending on the situation. 
+ * To accommodate this, the following enum is defined.
+ */
 enum {
-    NVME_RW_LR                  = 1 << 15,
-    NVME_RW_FUA                 = 1 << 14,
+    NVME_RW_LR                  = 1 << 15,      // Limited Retry
+    NVME_RW_FUA                 = 1 << 14,      // Force Unit Access
     NVME_RW_DSM_FREQ_UNSPEC     = 0,
     NVME_RW_DSM_FREQ_TYPICAL    = 1,
     NVME_RW_DSM_FREQ_RARE       = 2,
@@ -514,6 +607,9 @@ enum {
     NVME_RW_PRINFO_PRCHK_REF    = 1 << 10,
 };
 
+/**
+ * solesie: Dataset Management Command format (IO Command)
+ */
 typedef struct NvmeDsmCmd {
     uint8_t     opcode;
     uint8_t     flags;
@@ -530,7 +626,7 @@ typedef struct NvmeDsmCmd {
 enum {
     NVME_DSMGMT_IDR = 1 << 0,
     NVME_DSMGMT_IDW = 1 << 1,
-    NVME_DSMGMT_AD  = 1 << 2,
+    NVME_DSMGMT_AD  = 1 << 2,   // Deallocate
 };
 
 typedef struct NvmeDsmRange {
@@ -540,21 +636,32 @@ typedef struct NvmeDsmRange {
 } NvmeDsmRange;
 
 enum NvmeAsyncEventRequest {
+    // Asynchronous Event Type (AET)
+
     NVME_AER_TYPE_ERROR                     = 0,
     NVME_AER_TYPE_SMART                     = 1,
     NVME_AER_TYPE_IO_SPECIFIC               = 6,
     NVME_AER_TYPE_VENDOR_SPECIFIC           = 7,
+
+    // Asynchronous Event Information – Error Status
+
     NVME_AER_INFO_ERR_INVALID_SQ            = 0,
     NVME_AER_INFO_ERR_INVALID_DB            = 1,
     NVME_AER_INFO_ERR_DIAG_FAIL             = 2,
     NVME_AER_INFO_ERR_PERS_INTERNAL_ERR     = 3,
     NVME_AER_INFO_ERR_TRANS_INTERNAL_ERR    = 4,
     NVME_AER_INFO_ERR_FW_IMG_LOAD_ERR       = 5,
+
+    // Asynchronous Event Information – SMART / Health Status
+
     NVME_AER_INFO_SMART_RELIABILITY         = 0,
     NVME_AER_INFO_SMART_TEMP_THRESH         = 1,
     NVME_AER_INFO_SMART_SPARE_THRESH        = 2,
 };
 
+/**
+ * solesie: Asynchronous Event Request – Completion Queue Entry Dword 0
+ */
 typedef struct NvmeAerResult {
     uint8_t event_type;
     uint8_t event_info;
@@ -576,7 +683,14 @@ typedef struct NvmeCqe {
     uint16_t    status;
 } NvmeCqe;
 
+/**
+ * solesie: A of 0xABCD indicates DNR(Do Not Retry) or M(More) of CQE,
+ * B indicates SCT(Status Code Type) and 
+ * CD indicates SC(Status Code).
+ */
 enum NvmeStatusCodes {
+    // solesie: Generic Command Status (B = 0) start
+
     NVME_SUCCESS                = 0x0000,
     NVME_INVALID_OPCODE         = 0x0001,
     NVME_INVALID_FIELD          = 0x0002,
@@ -590,11 +704,15 @@ enum NvmeStatusCodes {
     NVME_CMD_ABORT_MISSING_FUSE = 0x000a,
     NVME_INVALID_NSID           = 0x000b,
     NVME_CMD_SEQ_ERROR          = 0x000c,
-    NVME_INVALID_CMD_SET        = 0x002c,
+    NVME_FDP_DISABLED           = 0x0029,   // solesie: FDP
+    NVME_INVALID_PHNDL          = 0x002a,   // solesie: FDP
     NVME_LBA_RANGE              = 0x0080,
     NVME_CAP_EXCEEDED           = 0x0081,
     NVME_NS_NOT_READY           = 0x0082,
     NVME_NS_RESV_CONFLICT       = 0x0083,
+
+    // solesie: Command Specific Status (B = 1) start
+
     NVME_INVALID_CQID           = 0x0100,
     NVME_INVALID_QID            = 0x0101,
     NVME_MAX_QSIZE_EXCEEDED     = 0x0102,
@@ -611,6 +729,7 @@ enum NvmeStatusCodes {
     NVME_FID_NOT_SAVEABLE       = 0x010d,
     NVME_FID_NOT_NSID_SPEC      = 0x010f,
     NVME_FW_REQ_SUSYSTEM_RESET  = 0x0110,
+    NVME_INVALID_CMD_SET        = 0x012c,   // solesie: 기존 FEMU의 0x002c 에서 변경됨.
     NVME_CONFLICTING_ATTRS      = 0x0180,
     NVME_INVALID_PROT_INFO      = 0x0181,
     NVME_WRITE_TO_RO            = 0x0182,
@@ -623,6 +742,9 @@ enum NvmeStatusCodes {
     NVME_ZONE_TOO_MANY_OPEN     = 0x01be,
     NVME_ZONE_INVAL_TRANSITION  = 0x01bf,
     NVME_INVALID_MEMORY_ADDRESS = 0x01C0,
+
+    // solesie: Media and Data Integrity Errors (B = 2) start
+
     NVME_WRITE_FAULT            = 0x0280,
     NVME_UNRECOVERED_READ       = 0x0281,
     NVME_E2E_GUARD_ERROR        = 0x0282,
@@ -631,17 +753,36 @@ enum NvmeStatusCodes {
     NVME_CMP_FAILURE            = 0x0285,
     NVME_ACCESS_DENIED          = 0x0286,
     NVME_DULB                   = 0x0287,
+
+    // solesie: DNR(Do Not Retry) or M(More) start
+
     NVME_MORE                   = 0x2000,
     NVME_DNR                    = 0x4000,
     NVME_NO_COMPLETE            = 0xffff,
 };
 
+/**
+ * solesie: SQE, CQE Data Structures end
+ */
+
+
+
+/**
+ * solesie: Admin Command Set start
+ */
+
+/**
+ * solesie: Define macros for Identify I/O Command Set data structure (CNS 1Ch)
+ */
 #define NVME_SET_CSI(vec, csi) (vec |= (uint8_t)(1 << (csi)))
 
+/**
+ * solesie: Firmware Slot Information (Log Page Identifier 03h)
+ */
 typedef struct NvmeFwSlotInfoLog {
-    uint8_t     afi;
+    uint8_t     afi;            // Active Firmware Info
     uint8_t     reserved1[7];
-    uint8_t     frs1[8];
+    uint8_t     frs1[8];        // Firmware Revision for Slot 1
     uint8_t     frs2[8];
     uint8_t     frs3[8];
     uint8_t     frs4[8];
@@ -651,10 +792,13 @@ typedef struct NvmeFwSlotInfoLog {
     uint8_t     reserved2[448];
 } NvmeFwSlotInfoLog;
 
+/**
+ * solesie: Error Information (Log Page Identifier 01h)
+ */
 typedef struct NvmeErrorLog {
     uint64_t    error_count;
-    uint16_t    sqid;
-    uint16_t    cid;
+    uint16_t    sqid;                   // Submission Queue ID
+    uint16_t    cid;                    // Command ID
     uint16_t    status_field;
     uint16_t    param_error_location;
     uint64_t    lba;
@@ -663,10 +807,13 @@ typedef struct NvmeErrorLog {
     uint8_t     resv[35];
 } NvmeErrorLog;
 
+/**
+ * solesie: SMART / Health Information (Log Page Identifier 02h)
+ */
 typedef struct NvmeSmartLog {
     uint8_t     critical_warning;
     uint8_t     temperature[2];
-    uint8_t     available_spare;
+    uint8_t     available_spare;            // Contains a normalized percentage (0% to 100%) of the remaining spare capacity available.
     uint8_t     available_spare_threshold;
     uint8_t     percentage_used;
     uint8_t     reserved1[26];
@@ -683,6 +830,9 @@ typedef struct NvmeSmartLog {
     uint8_t     reserved2[320];
 } NvmeSmartLog;
 
+/**
+ * solesie: NvmeSmartLog.critical_warning
+ */
 enum NvmeSmartWarn {
     NVME_SMART_SPARE                  = 1 << 0,
     NVME_SMART_TEMPERATURE            = 1 << 1,
@@ -691,20 +841,23 @@ enum NvmeSmartWarn {
     NVME_SMART_FAILED_VOLATILE_MEDIA  = 1 << 4,
 };
 
+/**
+ * solesie: Commands Supported and Effects (Log Page Identifier 05h)
+ */
 typedef struct NvmeEffectsLog {
-    uint32_t    acs[256];
-    uint32_t    iocs[256];
+    uint32_t    acs[256];       // Admin Command Supported
+    uint32_t    iocs[256];      // I/O Command Supported
     uint8_t     resv[2048];
 } NvmeEffectsLog;
 
 enum {
-    NVME_CMD_EFF_CSUPP      = 1 << 0,
-    NVME_CMD_EFF_LBCC       = 1 << 1,
-    NVME_CMD_EFF_NCC        = 1 << 2,
-    NVME_CMD_EFF_NIC        = 1 << 3,
-    NVME_CMD_EFF_CCC        = 1 << 4,
-    NVME_CMD_EFF_CSE_MASK   = 3 << 16,
-    NVME_CMD_EFF_UUID_SEL   = 1 << 19,
+    NVME_CMD_EFF_CSUPP      = 1 << 0,   // Command Supported
+    NVME_CMD_EFF_LBCC       = 1 << 1,   // Logical Block Content Change
+    NVME_CMD_EFF_NCC        = 1 << 2,   // Namespace Capability Change
+    NVME_CMD_EFF_NIC        = 1 << 3,   // Namespace Inventory Change
+    NVME_CMD_EFF_CCC        = 1 << 4,   // Controller Capability Change
+    NVME_CMD_EFF_CSE_MASK   = 3 << 16,  // Command Submission and Execution
+    NVME_CMD_EFF_UUID_SEL   = 1 << 19,  // UUID Selection Supported
 };
 
 enum LogIdentifier {
@@ -714,6 +867,9 @@ enum LogIdentifier {
     NVME_LOG_CMD_EFFECTS    = 0x05,
 };
 
+/**
+ * solesie: Power State Descriptor Data Structure
+ */
 typedef struct NvmePSD {
     uint16_t    mp;
     uint16_t    reserved;
@@ -728,6 +884,9 @@ typedef struct NvmePSD {
 
 #define NVME_IDENTIFY_DATA_SIZE 4096
 
+/**
+ * solesie: Identify - CNS Values
+ */
 enum NvmeIdCns {
     NVME_ID_CNS_NS                    = 0x00,
     NVME_ID_CNS_CTRL                  = 0x01,
@@ -743,39 +902,44 @@ enum NvmeIdCns {
     NVME_ID_CNS_IO_COMMAND_SET        = 0x1c,
 };
 
+/**
+ * solesie: Identify Controller Data Structure (CNS 01h)
+ */
 typedef struct QEMU_PACKED NvmeIdCtrl {
-    uint16_t    vid;
-    uint16_t    ssvid;
-    uint8_t     sn[20];
-    uint8_t     mn[40];
-    uint8_t     fr[8];
-    uint8_t     rab;
-    uint8_t     ieee[3];
-    uint8_t     cmic;
-    uint8_t     mdts;
-    uint16_t    cntlid;
-    uint32_t    ver;
+    // Controller Capabilities and Features start
+
+    uint16_t    vid;            // vendor id
+    uint16_t    ssvid;          // PCI Subsystem Vendor ID
+    uint8_t     sn[20];         // Serial Number
+    uint8_t     mn[40];         // Model Number
+    uint8_t     fr[8];          // Firmware Revision
+    uint8_t     rab;            // Recommended Arbitration Burst
+    uint8_t     ieee[3];        // IEEE OUI Identifier
+    uint8_t     cmic;           // Controller Multi-Path I/O and Namespace Sharing Capabilities
+    uint8_t     mdts;           // Maximum Data Transfer Size
+    uint16_t    cntlid;         // Controller ID
+    uint32_t    ver;            // Version
     uint32_t    rtd3r;
     uint32_t    rtd3e;
     uint32_t    oaes;
-    uint32_t    ctratt;
+    uint32_t    ctratt;         // Controller Attributes
     uint8_t     rsvd100[12];
     uint8_t     fguid[16];
     uint8_t     rsvd128[128];
-    uint16_t    oacs;
-    uint8_t     acl;
-    uint8_t     aerl;
-    uint8_t     frmw;
-    uint8_t     lpa;
-    uint8_t     elpe;
-    uint8_t     npss;
-    uint8_t     avscc;
-    uint8_t     apsta;
-    uint16_t    wctemp;
-    uint16_t    cctemp;
-    uint16_t    mtfa;
-    uint32_t    hmpre;
-    uint32_t    hmmin;
+    uint16_t    oacs;           // Optional Admin Command Support
+    uint8_t     acl;            // Abort Command Limit
+    uint8_t     aerl;           // Asynchronous Event Request Limit
+    uint8_t     frmw;           // Firmware Updates
+    uint8_t     lpa;            // Log Page Attributes
+    uint8_t     elpe;           // Error Log Page Entries
+    uint8_t     npss;           // Number of Power States Support
+    uint8_t     avscc;          // Admin Vendor Specific Command Configuration
+    uint8_t     apsta;          // Autonomous Power State Transition Attributes
+    uint16_t    wctemp;         // Warning Composite Temperature Threshold
+    uint16_t    cctemp;         // Critical Composite Temperature Threshold
+    uint16_t    mtfa;           // Maximum Time for Firmware Activation
+    uint32_t    hmpre;          // Host Memory Buffer Preferred Size
+    uint32_t    hmmin;          // Host Memory Buffer Minimum Size
     uint8_t     tnvmcap[16];
     uint8_t     unvmcap[16];
     uint32_t    rpmbs;
@@ -788,36 +952,51 @@ typedef struct QEMU_PACKED NvmeIdCtrl {
     uint16_t    mxtmt;
     uint32_t    sanicap;
     uint8_t     rsvd332[180];
-    uint8_t     sqes;
-    uint8_t     cqes;
+
+    // NVM Command Set Attributes start
+
+    uint8_t     sqes;           // Submission Queue Entry Size
+    uint8_t     cqes;           // Completion Queue Entry Size
     uint16_t    maxcmd;
-    uint32_t    nn;
-    uint16_t    oncs;
-    uint16_t    fuses;
-    uint8_t     fna;
-    uint8_t     vwc;
-    uint16_t    awun;
-    uint16_t    awupf;
-    uint8_t     nvscc;
+    uint32_t    nn;             // Number of Namespaces
+    uint16_t    oncs;           // Optional NVM Command Support
+    uint16_t    fuses;          // Fused Operation Support
+    uint8_t     fna;            // Format NVM Attributes
+    uint8_t     vwc;            // Volatile Write Cache
+    uint16_t    awun;           // Atomic Write Unit Normal
+    uint16_t    awupf;          // Atomic Write Unit Power Fail
+    uint8_t     nvscc;          // I/O Command Set Vendor Specific Command Configuration
     uint8_t     rsvd531;
-    uint16_t    acwu;
+    uint16_t    acwu;           // Atomic Compare & Write Unit
     uint8_t     rsvd534[2];
-    uint32_t    sgls;
+    uint32_t    sgls;           // SGL Support
     uint8_t     rsvd540[228];
-    uint8_t     subnqn[256];
+    uint8_t     subnqn[256];    // NVM Subsystem NVMe Qualified Name
     uint8_t     rsvd1024[1024];
+
+    // Power State Descriptors start
+
     NvmePSD     psd[32];
+
+    // Vendor Specific start
+
     uint8_t     vs[1024];
 } NvmeIdCtrl;
 
+/**
+ * solesie: NvmeIdCtrl.oacs
+ */
 enum NvmeIdCtrlOacs {
     NVME_OACS_SECURITY      = 1 << 0,
     NVME_OACS_FORMAT        = 1 << 1,
     NVME_OACS_FW            = 1 << 2,
-    NVME_OACS_Oc12DEV = 1 << 3,
+    NVME_OACS_Oc12DEV       = 1 << 3,
     NVME_OACS_DBBUF         = 1 << 8,
 };
 
+/**
+ * solesie: NvmeIdCtrl.oncs
+ */
 enum NvmeIdCtrlOncs {
     NVME_ONCS_COMPARE       = 1 << 0,
     NVME_ONCS_WRITE_UNCORR  = 1 << 1,
@@ -842,6 +1021,9 @@ enum NvmeIdCtrlLpa {
 #define NVME_CTRL_CQES_MIN(cqes) ((cqes) & 0xf)
 #define NVME_CTRL_CQES_MAX(cqes) (((cqes) >> 4) & 0xf)
 
+/**
+ * solesie: Set Features
+ */
 typedef struct NvmeFeatureVal {
     uint32_t    arbitration;
     uint32_t    power_mgmt;
@@ -856,16 +1038,25 @@ typedef struct NvmeFeatureVal {
     uint32_t    sw_prog_marker;
 } NvmeFeatureVal;
 
-#define NVME_ARB_AB(arb)        (arb & 0x7)
-#define NVME_ARB_LPW(arb)       ((arb >> 8) & 0xff)
-#define NVME_ARB_MPW(arb)       ((arb >> 16) & 0xff)
-#define NVME_ARB_HPW(arb)       ((arb >> 24) & 0xff)
+/**
+ * solesie: NvmeFeatureVal.arbitration
+ */
+#define NVME_ARB_AB(arb)        (arb & 0x7)             // Arbitration Burst
+#define NVME_ARB_LPW(arb)       ((arb >> 8) & 0xff)     // Low Priority Weight
+#define NVME_ARB_MPW(arb)       ((arb >> 16) & 0xff)    // Medium Priority Weight
+#define NVME_ARB_HPW(arb)       ((arb >> 24) & 0xff)    // High Priority Weight
 
 #define NVME_INTC_THR(intc)     (intc & 0xff)
 #define NVME_INTC_TIME(intc)    ((intc >> 8) & 0xff)
 
-#define NVME_ERR_REC_DULBE(err_rec) (err_rec & 0x10000)
+/**
+ * solesie: NvmeFeatureVal.err_rec
+ */
+#define NVME_ERR_REC_DULBE(err_rec) (err_rec & 0x10000) // Deallocated or Unwritten Logical Block Error Enable
 
+/**
+ * solesie: Set Features – Feature Identifiers
+ */
 enum NvmeFeatureIds {
     NVME_ARBITRATION                = 0x1,
     NVME_POWER_MANAGEMENT           = 0x2,
@@ -879,16 +1070,26 @@ enum NvmeFeatureIds {
     NVME_WRITE_ATOMICITY            = 0xa,
     NVME_ASYNCHRONOUS_EVENT_CONF    = 0xb,
     NVME_TIMESTAMP                  = 0xe,
+
+    NVME_FDP                        = 0x1d,
+    NVME_FDP_EVENT                  = 0x1e,
+
     NVME_SOFTWARE_PROGRESS_MARKER   = 0x80,
     NVME_FID_MAX                    = 0x100
 };
 
+/**
+ * solesie: Get Features Command Completion
+ */
 typedef enum NvmeFeatureCap {
     NVME_FEAT_CAP_SAVE      = 1 << 0,
     NVME_FEAT_CAP_NS        = 1 << 1,
     NVME_FEAT_CAP_CHANGE    = 1 << 2,
 } NvmeFeatureCap;
 
+/**
+ * solesie: Get Features Select field
+ */
 typedef enum NvmeGetFeatureSelect {
     NVME_GETFEAT_SELECT_CURRENT = 0x0,
     NVME_GETFEAT_SELECT_DEFAULT = 0x1,
@@ -896,6 +1097,9 @@ typedef enum NvmeGetFeatureSelect {
     NVME_GETFEAT_SELECT_CAP     = 0x3,
 } NvmeGetFeatureSelect;
 
+/**
+ * solesie: Get/Set Features LBA Range Type – Data Structure Entry
+ */
 typedef struct NvmeRangeType {
     uint8_t     type;
     uint8_t     attributes;
@@ -906,49 +1110,58 @@ typedef struct NvmeRangeType {
     uint8_t     rsvd48[16];
 } NvmeRangeType;
 
+/**
+ * solesie: LBA Format Data Structure, NVM Command Set Specific
+ */
 typedef struct NvmeLBAF {
-    uint16_t    ms;
-    uint8_t     lbads;
-    uint8_t     rp;
+    uint16_t    ms;     // Metadata Size
+    uint8_t     lbads;  // LBA Data Size
+    uint8_t     rp;     // Relative Performance
 } NvmeLBAF;
 
 #define NVME_NSID_BROADCAST 0xffffffff
 
+/**
+ * solesie: NVM Command Set Identify Namespace Data Structure (CNS 00h)
+ */
 typedef struct NvmeIdNs {
     uint64_t    nsze;
     uint64_t    ncap;
-    uint64_t    nuse;
+    uint64_t    nuse;           // Namespace Utilization
     uint8_t     nsfeat;
-    uint8_t     nlbaf;
-    uint8_t     flbas;
-    uint8_t     mc;
-    uint8_t     dpc;
-    uint8_t     dps;
-    uint8_t     nmic;
-    uint8_t     rescap;
-    uint8_t     fpi;
-    uint8_t     dlfeat;
-    uint16_t    nawun;
-    uint16_t    nawupf;
-    uint16_t    nacwu;
-    uint16_t    nabsn;
-    uint16_t    nabo;
-    uint16_t    nabspf;
-    uint16_t    noiob;
-    uint8_t     nvmcap[16];
-    uint16_t    npwg;
-    uint16_t    npwa;
-    uint16_t    npdg;
-    uint16_t    npda;
-    uint16_t    nows;
+    uint8_t     nlbaf;          // Number of LBA Formats 
+    uint8_t     flbas;          // Formatted LBA Size
+    uint8_t     mc;             // Metadata Capabilities
+    uint8_t     dpc;            // End-to-end Data Protection Capabilities
+    uint8_t     dps;            // End-to-end Data Protection Type Settings
+    uint8_t     nmic;           // Namespace Multi-path I/O and Namespace Sharing Capabilities
+    uint8_t     rescap;         // Reservation Capabilities
+    uint8_t     fpi;            // Format Progress Indicator
+    uint8_t     dlfeat;         // Deallocate Logical Block Features
+    uint16_t    nawun;          // Namespace Atomic Write Unit Norma
+    uint16_t    nawupf;         // Namespace Atomic Write Unit Power Fail
+    uint16_t    nacwu;          // Namespace Atomic Compare & Write Unit
+    uint16_t    nabsn;          // Namespace Atomic Boundary Size Normal
+    uint16_t    nabo;           // Namespace Atomic Boundary Offset
+    uint16_t    nabspf;         // Namespace Atomic Boundary Size Power Fail
+    uint16_t    noiob;          // Namespace Optimal I/O Boundary
+    uint8_t     nvmcap[16];     // NVM Capacity
+    uint16_t    npwg;           // Namespace Preferred Write Granularity
+    uint16_t    npwa;           // Namespace Preferred Write Alignment
+    uint16_t    npdg;           // Namespace Preferred Deallocate Granularity
+    uint16_t    npda;           // Namespace Preferred Deallocate Alignment
+    uint16_t    nows;           // Namespace Optimal Write Size
     uint8_t     rsvd74[30];
-    uint8_t     nguid[16];
-    uint64_t    eui64;
-    NvmeLBAF    lbaf[16];
+    uint8_t     nguid[16];      // Namespace Globally Unique Identifier
+    uint64_t    eui64;          // IEEE Extended Unique Identifier
+    NvmeLBAF    lbaf[16];       // LBA Formats
     uint8_t     rsvd192[192];
     uint8_t     vs[3712];
 } NvmeIdNs;
 
+/**
+ * solesie: Identify – Namespace Identification Descriptor
+ */
 typedef struct QEMU_PACKED NvmeIdNsDescr {
     uint8_t nidt;
     uint8_t nidl;
@@ -989,6 +1202,12 @@ enum NvmeIdNsDps {
     DPS_TYPE_MASK   = 0x7,
     DPS_FIRST_EIGHT = 8,
 };
+
+/**
+ * Admin Command Set end
+ */
+
+
 
 static inline void nvme_check_size(void)
 {
@@ -1272,53 +1491,53 @@ typedef struct FemuCtrl {
 
     time_t      start_time;
     uint16_t    temperature;
-    uint16_t    page_size;
-    uint16_t    page_bits;
-    uint16_t    max_prp_ents;
+    uint16_t    page_size;                  // in bytes
+    uint16_t    page_bits;                  // in bits
+    uint16_t    max_prp_ents;               // max PRP List
     uint16_t    cqe_size;
     uint16_t    sqe_size;
-    uint16_t    oacs;
-    uint16_t    oncs;
-    uint32_t    reg_size;
+    uint16_t    oacs;                       // Optional Admin Command Support
+    uint16_t    oncs;                       // Optional NVM Command Support
+    uint32_t    reg_size;                   // dma register size in bytes
     uint32_t    num_namespaces;
     uint32_t    num_io_queues;
-    uint32_t    max_q_ents;
+    uint32_t    max_q_ents;                 // Maximum Queue Entries Supported
     uint64_t    ns_size;
-    uint8_t     db_stride;
-    uint8_t     aerl;
-    uint8_t     acl;
-    uint8_t     elpe;
+    uint8_t     db_stride;                  // doorbell stride
+    uint8_t     aerl;                       // Asynchronous Event Request Limit
+    uint8_t     acl;                        // Abort Command Limit
+    uint8_t     elpe;                       // Error Log Page Entries
     uint8_t     elp_index;
     uint8_t     error_count;
-    uint8_t     mdts;
-    uint8_t     cqr;
+    uint8_t     mdts;                       // Maximum Data Transfer Size
+    uint8_t     cqr;                        // Contiguous Queues Required
     uint8_t     max_sqes;
     uint8_t     max_cqes;
     uint8_t     meta;
-    uint8_t     vwc;
-    uint8_t     mc;
-    uint8_t     dpc;
-    uint8_t     dps;
-    uint8_t     nlbaf;
+    uint8_t     vwc;                        // Volatile Write Cache
+    uint8_t     mc;                         // Metadata Capabilities
+    uint8_t     dpc;                        // End-to-end Data Protection Capabilities
+    uint8_t     dps;                        // End-to-end Data Protection Type Settings
+    uint8_t     nlbaf;                      // Number of LBA Formats 
     uint8_t     extended;
     uint8_t     lba_index;
-    uint8_t     mpsmin;
-    uint8_t     mpsmax;
-    uint8_t     ms;
+    uint8_t     mpsmin;                     // Memory Page Size Minimum
+    uint8_t     mpsmax;                     // Memory Page Size Maximum
+    uint8_t     ms;                         // Metadata Size
     uint8_t     ms_max;
-    uint8_t     intc;
-    uint8_t     intc_thresh;
-    uint8_t     intc_time;
+    uint8_t     intc;                       // Interrupt Coalescing
+    uint8_t     intc_thresh;                // intc Aggregation Threshold
+    uint8_t     intc_time;                  // intc Aggregation Time
     uint8_t     outstanding_aers;
     uint8_t     temp_warn_issued;
-    uint8_t     num_errors;
+    uint8_t     num_errors;                 // SMART - Number of Error Information Log Entries
     uint8_t     cqes_pending;
     uint16_t    vid;
     uint16_t    did;
-    uint8_t     dlfeat;
-    uint32_t    cmbsz;
-    uint32_t    cmbloc;
-    uint8_t     *cmbuf;
+    uint8_t     dlfeat;                     // Deallocate Logical Block Features
+    uint32_t    cmbsz;                      // Controller Memory Buffer Size
+    uint32_t    cmbloc;                     // Controller Memory Buffer Location
+    uint8_t     *cmbuf;                     // Controller Memory Buffer
 
     QemuThread  *poller;
     bool        dataplane_started;
@@ -1343,14 +1562,14 @@ typedef struct FemuCtrl {
     QEMUTimer       *aer_timer;
     uint8_t         aer_mask;
 
-	uint64_t		dbs_addr;
-	uint64_t		eis_addr;
-    uint64_t        dbs_addr_hva;
+	uint64_t		dbs_addr;               // Shadow Doorbell
+	uint64_t		eis_addr;               // EventIdx
+    uint64_t        dbs_addr_hva;           // Host Virtual Address
     uint64_t        eis_addr_hva;
 
     uint8_t         femu_mode;
     uint8_t         lver; /* Coperd: OCSSD version, 0x1 -> OC1.2, 0x2 -> OC2.0 */
-    uint32_t        memsz;
+    uint32_t        memsz;                  // devsz_mb
     OcCtrlParams    oc_params;
 
     Oc12Ctrl  *oc12_ctrl;
@@ -1381,7 +1600,7 @@ typedef struct FemuCtrl {
     struct rte_ring **to_ftl;
     struct rte_ring **to_poller;
     pqueue_t        **pq;
-    bool            *should_isr;
+    bool            *should_isr;            // Interrupt Service Routine
     bool            poller_on;
 
     int64_t         nr_tt_ios;
@@ -1510,6 +1729,9 @@ int nvme_register_nossd(FemuCtrl *n);
 int nvme_register_bbssd(FemuCtrl *n);
 int nvme_register_znssd(FemuCtrl *n);
 
+/**
+ * solesie: get num of lab blks of ns
+ */
 static inline uint64_t ns_blks(NvmeNamespace *ns, uint8_t lba_idx)
 {
     FemuCtrl *n = ns->ctrl;
@@ -1522,8 +1744,11 @@ static inline uint64_t ns_blks(NvmeNamespace *ns, uint8_t lba_idx)
     return ns_size / lba_sz;
 }
 
-static inline hwaddr nvme_discontig(uint64_t *dma_addr, uint16_t page_size,
-    uint16_t queue_idx, uint16_t entry_size)
+/**
+ * solesie: calculate discontiguous DMA address of queue_idx
+ */
+static inline hwaddr nvme_discontig(uint64_t *dma_addr, uint16_t queue_idx,
+    uint16_t page_size, uint16_t entry_size)
 {
     uint16_t entries_per_page = page_size / entry_size;
     uint16_t prp_index = queue_idx / entries_per_page;
@@ -1532,6 +1757,9 @@ static inline hwaddr nvme_discontig(uint64_t *dma_addr, uint16_t page_size,
     return dma_addr[prp_index] + index_in_prp * entry_size;
 }
 
+/**
+ * solesie: check len bytes using Maximum Data Transfer Size
+ */
 static inline uint16_t nvme_check_mdts(FemuCtrl *n, size_t len)
 {
     uint8_t mdts = n->mdts;

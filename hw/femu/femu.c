@@ -3,7 +3,7 @@
 
 #include "./nvme.h"
 
-#define NVME_SPEC_VER (0x00010400)
+#define NVME_SPEC_VER (0x00020100) // solesie: 2.1.0
 
 static void nvme_clear_ctrl(FemuCtrl *n, bool shutdown)
 {
