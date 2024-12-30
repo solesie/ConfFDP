@@ -471,7 +471,7 @@ enum NvmeIoCommands {
     NVME_CMD_OC_READ            = 0x92,
 
     NVME_CMD_IO_MGMT_SEND       = 0x1d,     // solesie: TODO: Not implemented in FEMU.
-    NVME_CMD_IO_MGMT_SEND       = 0x12      // solesie: TODO: Not implemented in FEMU.
+    NVME_CMD_IO_MGMT_RECV       = 0x12      // solesie: TODO: Not implemented in FEMU.
 };
 
 /**
@@ -850,6 +850,27 @@ typedef struct NvmeEffectsLog {
     uint8_t     resv[2048];
 } NvmeEffectsLog;
 
+/**
+ * solesie: Endurance Group Information (Log Page Identifier 09h)
+ */
+typedef struct QEMU_PACKED NvmeEndGrpLog {
+    uint8_t  critical_warning;
+    uint8_t  rsvd[2];
+    uint8_t  avail_spare;
+    uint8_t  avail_spare_thres;
+    uint8_t  percet_used;
+    uint8_t  rsvd1[26];
+    uint64_t end_estimate[2];               // Endurance Estimate
+    uint64_t data_units_read[2];
+    uint64_t data_units_written[2];
+    uint64_t media_units_written[2];        // include GC
+    uint64_t host_read_commands[2];
+    uint64_t host_write_commands[2];
+    uint64_t media_integrity_errors[2];
+    uint64_t no_err_info_log_entries[2];
+    uint8_t rsvd2[352];
+} NvmeEndGrpLog;
+
 enum {
     NVME_CMD_EFF_CSUPP      = 1 << 0,   // Command Supported
     NVME_CMD_EFF_LBCC       = 1 << 1,   // Logical Block Content Change
@@ -865,6 +886,8 @@ enum LogIdentifier {
     NVME_LOG_SMART_INFO     = 0x02,
     NVME_LOG_FW_SLOT_INFO   = 0x03,
     NVME_LOG_CMD_EFFECTS    = 0x05,
+
+    NVME_LOG_ENDGRP         = 0x09,
 };
 
 /**
@@ -882,6 +905,7 @@ typedef struct NvmePSD {
     uint8_t     resv[16];
 } NvmePSD;
 
+#define NVME_CONTROLLER_LIST_SIZE 2048
 #define NVME_IDENTIFY_DATA_SIZE 4096
 
 /**
@@ -900,6 +924,8 @@ enum NvmeIdCns {
     NVME_ID_CNS_CS_NS_PRESENT_LIST    = 0x1a,
     NVME_ID_CNS_CS_NS_PRESENT         = 0x1b,
     NVME_ID_CNS_IO_COMMAND_SET        = 0x1c,
+
+    NVME_ID_CNS_ENDURANCE_GROUP_LIST  = 0x19,
 };
 
 /**
@@ -951,7 +977,9 @@ typedef struct QEMU_PACKED NvmeIdCtrl {
     uint16_t    mntmt;
     uint16_t    mxtmt;
     uint32_t    sanicap;
-    uint8_t     rsvd332[180];
+    uint8_t     rsvd332[8];
+    uint16_t    endgidmax;
+    uint8_t     rsvd342[170];
 
     // NVM Command Set Attributes start
 
@@ -982,6 +1010,11 @@ typedef struct QEMU_PACKED NvmeIdCtrl {
 
     uint8_t     vs[1024];
 } NvmeIdCtrl;
+
+enum NvmeIdCtrlCtratt {
+    NVME_CTRATT_ENDGRPS = 1 <<  4,
+    NVME_CTRATT_FDPS    = 1 << 19,
+};
 
 /**
  * solesie: NvmeIdCtrl.oacs
@@ -1335,6 +1368,53 @@ typedef struct Oc12Ctrl Oc12Ctrl;
 typedef struct NvmeIdNsZoned NvmeIdNsZoned;
 typedef struct NvmeZone NvmeZone;
 
+
+
+
+
+
+
+#define NVME_FDP_MAX_EVENTS 63
+
+typedef struct QEMU_PACKED NvmeFdpEvent {
+    uint8_t  type;
+    uint8_t  flags;
+    uint16_t pid;
+    uint64_t timestamp;
+    uint32_t nsid;
+    uint64_t type_specific[2];
+    uint16_t rgid;
+    uint8_t  ruhid;
+    uint8_t  rsvd35[5];
+    uint64_t vendor[3];
+} NvmeFdpEvent;
+
+typedef struct NvmeFdpEventBuffer {
+    NvmeFdpEvent     events[NVME_FDP_MAX_EVENTS];
+    unsigned int     nelems;
+    unsigned int     start;
+    unsigned int     next;
+} NvmeFdpEventBuffer;
+
+typedef struct NvmeEnduranceGroup {
+    uint8_t event_conf;
+    struct FemuCtrl *ctrl;
+    struct NvmeNamespace *namespaces;
+
+    struct {
+        NvmeFdpEventBuffer host_events, ctrl_events;
+
+        uint64_t hbmw;                  // Host Bytes with Metadata Written (not include GC)
+        uint64_t mbmw;                  // Media Bytes with Metadata Written
+        uint64_t mbe;                   // Media Bytes Erased
+
+        bool enabled;
+    } fdp;
+} NvmeEnduranceGroup;
+
+
+
+
 typedef struct NvmeNamespace {
     struct FemuCtrl *ctrl;
     NvmeIdNs        id_ns;
@@ -1358,9 +1438,19 @@ typedef struct NvmeNamespace {
         uint64_t data;
         uint64_t meta;
     } blk;
-
     void *state;
+
+    /* solesie: FDP */
+    NvmeEnduranceGroup *endgrp;
+    struct {
+        uint16_t nphs;
+        /* reclaim unit handle identifiers indexed by placement handle */
+        uint16_t *phs;
+    } fdp;
 } NvmeNamespace;
+
+
+
 
 #define TYPE_NVME "femu"
 #define FEMU(obj) OBJECT_CHECK(FemuCtrl, (obj), TYPE_NVME)
@@ -1381,6 +1471,31 @@ typedef struct Oc20Params {
     char *resetfail_fname;
     char *writefail_fname;
 } Oc20Params;
+
+typedef struct FdpParams {
+    uint64_t runs;
+    int nrg;
+    int chs_per_rg;
+    int ways_per_rg;
+    int nruh;
+} FdpParams;
+
+typedef struct ConfParams {
+    int secsz;
+	int secs_per_pg;
+	int pgs_per_blk;
+	int pls_per_lun;
+	int luns_per_ch;
+	int nchs;
+
+	int pg_rd_lat;
+	int pg_wr_lat;
+	int blk_er_lat;
+	int ch_xfer_lat;
+
+	int gc_thres_pcent;
+	int gc_thres_pcent_high;
+} ConfParams;
 
 typedef struct NvmeParams {
     char     *serial;
@@ -1558,6 +1673,12 @@ typedef struct FemuCtrl {
     NvmeFeatureVal  features;
     NvmeIdCtrl      id_ctrl;
 
+    /* solesie: FDP */
+    NvmeEnduranceGroup *endgrp;
+    FdpParams           fdp_params;
+    ConfParams          conf_params;
+    struct fdpssd       *fdpssd;
+
     QSIMPLEQ_HEAD(aer_queue, NvmeAsyncEvent) aer_queue;
     QEMUTimer       *aer_timer;
     uint8_t         aer_mask;
@@ -1634,8 +1755,9 @@ enum {
     FEMU_BBSSD_MODE = 1,
     FEMU_NOSSD_MODE = 2,
     FEMU_ZNSSD_MODE = 3,
-    FEMU_SMARTSSD_MODE,
-    FEMU_KVSSD_MODE,
+    FEMU_SMARTSSD_MODE = 4,
+    FEMU_KVSSD_MODE = 5,
+    FEMU_FDPSSD_MODE = 6
 };
 
 enum {
@@ -1666,6 +1788,11 @@ static inline bool NOSSD(FemuCtrl *n)
 static inline bool ZNSSD(FemuCtrl *n)
 {
     return (n->femu_mode == FEMU_ZNSSD_MODE);
+}
+
+static inline bool FDPSSD(FemuCtrl * n)
+{
+    return (n->femu_mode == FEMU_FDPSSD_MODE);
 }
 
 /* Basic NVMe Queue Pair operation APIs from nvme-util.c */
@@ -1728,6 +1855,7 @@ int nvme_register_ocssd20(FemuCtrl *n);
 int nvme_register_nossd(FemuCtrl *n);
 int nvme_register_bbssd(FemuCtrl *n);
 int nvme_register_znssd(FemuCtrl *n);
+int nvme_register_fdpssd(FemuCtrl *n);
 
 /**
  * solesie: get num of lab blks of ns

@@ -515,6 +515,29 @@ static uint16_t nvme_identify_cmd_set(FemuCtrl *n, NvmeCmd *cmd)
     return dma_read_prp(n, list, data_len, prp1, prp2);
 }
 
+static uint16_t nvme_identify_endgrp_list(FemuCtrl *n, NvmeCmd *cmd)
+{
+    uint8_t list[NVME_IDENTIFY_DATA_SIZE] = {};
+    uint16_t *list_ptr = (uint16_t *)list;
+    uint16_t *nr_ids = &list_ptr[0];
+    uint16_t *ids = &list_ptr[1];
+    uint16_t endgid = le32_to_cpu(cmd->cdw11) & 0xffff;
+    uint64_t prp1 = le64_to_cpu(cmd->dptr.prp1);
+    uint64_t prp2 = le64_to_cpu(cmd->dptr.prp2);
+
+    /*
+     * The current nvme-subsys only supports Endurance Group #1.
+     */
+    if (!endgid) {
+        *nr_ids = cpu_to_le16(1);
+        ids[0] = cpu_to_le16(1);
+    } else {
+        *nr_ids = cpu_to_le16(0);
+    }
+
+    return dma_read_prp(n, list, sizeof(list), prp1, prp2);
+}
+
 static uint16_t nvme_identify(FemuCtrl *n, NvmeCmd *cmd)
 {
     NvmeIdentify *c = (NvmeIdentify *)cmd;
@@ -541,6 +564,8 @@ static uint16_t nvme_identify(FemuCtrl *n, NvmeCmd *cmd)
         return nvme_identify_ns_descr_list(n, cmd);
     case NVME_ID_CNS_IO_COMMAND_SET:
         return nvme_identify_cmd_set(n, cmd);
+    case NVME_ID_CNS_ENDURANCE_GROUP_LIST:
+        return nvme_identify_endgrp_list(n, cmd);
     default:
         return NVME_INVALID_FIELD | NVME_DNR;
     }
@@ -779,6 +804,47 @@ static uint16_t nvme_cmd_effects(FemuCtrl *n, NvmeCmd *cmd, uint8_t csi,
     return dma_read_prp(n, ((uint8_t *)&log) + off, trans_len, prp1, prp2);
 }
 
+static uint16_t nvme_endgrp_info(FemuCtrl *n, NvmeCmd *cmd, uint32_t buf_len, uint64_t off)
+{
+    uint64_t prp1 = le64_to_cpu(cmd->dptr.prp1);
+    uint64_t prp2 = le64_to_cpu(cmd->dptr.prp2);
+
+    uint16_t endgrpid = (cmd->cdw11 >> 16) & 0xffff;
+    NvmeEndGrpLog info = {};
+    NvmeNamespace *ns;
+    int i;
+
+    if (!n->endgrp || endgrpid != 0x1) {
+        return NVME_INVALID_FIELD | NVME_DNR;
+    }
+
+    if (off >= sizeof(info)) {
+        return NVME_INVALID_FIELD | NVME_DNR;
+    }
+
+    for (i = 1; i <= n->num_namespaces; i++) {
+        ns = nvme_ns(n, i);
+        if (!ns) {
+            continue;
+        }
+        // nvme_set_blk_stats(ns, &stats);
+    }
+
+    info.data_units_read[0] =
+        cpu_to_le64(DIV_ROUND_UP(0 / 1000000000, 1000000000));
+    info.data_units_written[0] =
+        cpu_to_le64(DIV_ROUND_UP(0 / 1000000000, 1000000000));
+    info.media_units_written[0] =
+        cpu_to_le64(DIV_ROUND_UP(0 / 1000000000, 1000000000));
+
+    info.host_read_commands[0] = cpu_to_le64(0);
+    info.host_write_commands[0] = cpu_to_le64(0);
+
+    buf_len = MIN(sizeof(info) - off, buf_len);
+
+    return dma_read_prp(n, (uint8_t *)&info + off, buf_len, prp1, prp2);
+}
+
 static uint16_t nvme_get_log(FemuCtrl *n, NvmeCmd *cmd)
 {
     uint32_t dw10 = le32_to_cpu(cmd->cdw10);
@@ -818,6 +884,8 @@ static uint16_t nvme_get_log(FemuCtrl *n, NvmeCmd *cmd)
         return nvme_fw_log_info(n, cmd, len);
     case NVME_LOG_CMD_EFFECTS:
         return nvme_cmd_effects(n, cmd, csi, len, off);
+    case NVME_LOG_ENDGRP:
+        return nvme_endgrp_info(n, cmd, len, off);
     default:
         if (n->ext_ops.get_log) {
             return n->ext_ops.get_log(n, cmd);

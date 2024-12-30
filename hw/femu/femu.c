@@ -363,6 +363,7 @@ static int nvme_init_namespace(FemuCtrl *n, NvmeNamespace *ns, Error **errp)
     ns->ns_blks = ns_blks(ns, lba_index);
     ns->util = bitmap_new(num_blks);
     ns->uncorrectable = bitmap_new(num_blks);
+    ns->endgrp = n->endgrp;
 
     return 0;
 }
@@ -392,6 +393,7 @@ static void nvme_init_ctrl(FemuCtrl *n)
     uint8_t *pci_conf = n->parent_obj.config;
     char *subnqn;
     int i;
+    uint32_t ctratt = 0;
 
     id->vid = cpu_to_le16(pci_get_word(pci_conf + PCI_VENDOR_ID));
     id->ssvid = cpu_to_le16(pci_get_word(pci_conf + PCI_SUBSYSTEM_VENDOR_ID));
@@ -442,6 +444,13 @@ static void nvme_init_ctrl(FemuCtrl *n)
         n->features.int_vector_config[i] = i | (n->intc << 16);
     }
 
+    ctratt |= NVME_CTRATT_ENDGRPS;
+    id->endgidmax = cpu_to_le16(0x1);
+    if (FDPSSD(n)) {
+        ctratt |= NVME_CTRATT_FDPS;
+    }
+    id->ctratt = cpu_to_le32(ctratt);
+
     n->bar.cap = 0;
     NVME_CAP_SET_MQES(n->bar.cap, n->max_q_ents);
     NVME_CAP_SET_CQR(n->bar.cap, n->cqr);
@@ -459,6 +468,18 @@ static void nvme_init_ctrl(FemuCtrl *n)
     n->bar.vs = NVME_SPEC_VER;
     n->bar.intmc = n->bar.intms = 0;
     n->temperature = NVME_TEMPERATURE;
+}
+
+static void nvme_init_endgrp(FemuCtrl *n)
+{
+    NvmeEnduranceGroup *endgrp = n->endgrp;
+    
+    if(FDPSSD(n)){
+        endgrp->fdp.enabled = true;
+    }
+
+    endgrp->ctrl = n;
+    endgrp->namespaces = n->namespaces;
 }
 
 static void nvme_init_cmb(FemuCtrl *n)
@@ -532,6 +553,8 @@ static int nvme_register_extensions(FemuCtrl *n)
         nvme_register_bbssd(n);
     } else if (ZNSSD(n)) {
         nvme_register_znssd(n);
+    } else if (FDPSSD(n)){
+        nvme_register_fdpssd(n);
     } else {
     }
 
@@ -635,8 +658,10 @@ static void femu_realize(PCIDevice *pci_dev, Error **errp)
     n->elpes = g_malloc0(sizeof(*n->elpes) * (n->elpe + 1));
     n->aer_reqs = g_malloc0(sizeof(*n->aer_reqs) * (n->aerl + 1));
     n->features.int_vector_config = g_malloc0(sizeof(*n->features.int_vector_config) * (n->num_io_queues + 1));
+    n->endgrp = g_malloc0(sizeof(*n->endgrp));
 
     nvme_init_pci(n);
+    nvme_init_endgrp(n);
     nvme_init_ctrl(n);
     nvme_init_namespaces(n, errp);
 
@@ -684,6 +709,8 @@ static void femu_exit(PCIDevice *pci_dev)
     g_free(n->elpes);
     g_free(n->cq);
     g_free(n->sq);
+    g_free(n->endgrp);
+
     msix_uninit_exclusive_bar(pci_dev);
     memory_region_unref(&n->iomem);
     if (n->cmbsz) {
@@ -693,7 +720,7 @@ static void femu_exit(PCIDevice *pci_dev)
 
 static Property femu_props[] = {
     DEFINE_PROP_STRING("serial", FemuCtrl, serial),
-    DEFINE_PROP_UINT32("devsz_mb", FemuCtrl, memsz, 1024), /* in MB */
+    DEFINE_PROP_UINT32("devsz_mb", FemuCtrl, memsz, 65536), /* in MB */
     DEFINE_PROP_UINT32("namespaces", FemuCtrl, num_namespaces, 1),
     DEFINE_PROP_UINT32("queues", FemuCtrl, num_io_queues, 16),
     DEFINE_PROP_UINT32("entries", FemuCtrl, max_q_ents, 0x7ff),
@@ -739,6 +766,26 @@ static Property femu_props[] = {
     DEFINE_PROP_UINT8("lnum_lun", FemuCtrl, oc_params.num_lun, 8),
     DEFINE_PROP_UINT8("lnum_pln", FemuCtrl, oc_params.num_pln, 2),
     DEFINE_PROP_UINT16("lmetasize", FemuCtrl, oc_params.sos, 16),
+
+    DEFINE_PROP_SIZE("runs", FemuCtrl, fdp_params.runs, 134217728), /* in Bytes */
+    DEFINE_PROP_INT32("nrg", FemuCtrl, fdp_params.nrg, 2),
+    DEFINE_PROP_INT32("chs_per_rg", FemuCtrl, fdp_params.chs_per_rg, 4),
+    DEFINE_PROP_INT32("ways_per_rg", FemuCtrl, fdp_params.ways_per_rg, 8),
+    DEFINE_PROP_INT32("nruh", FemuCtrl, fdp_params.nruh, 8),
+
+    DEFINE_PROP_INT32("secsz", FemuCtrl, conf_params.secsz, 4096),
+    DEFINE_PROP_INT32("secs_per_pg", FemuCtrl, conf_params.secs_per_pg, 4),      // 16kb
+    DEFINE_PROP_INT32("pgs_per_blk", FemuCtrl, conf_params.pgs_per_blk, 256),    // 4mb
+    DEFINE_PROP_INT32("pls_per_lun", FemuCtrl, conf_params.pls_per_lun, 1),
+    DEFINE_PROP_INT32("luns_per_ch", FemuCtrl, conf_params.luns_per_ch, 8),      // 8way
+    DEFINE_PROP_INT32("nchs", FemuCtrl, conf_params.nchs, 8),
+
+    DEFINE_PROP_INT32("pg_rd_lat", FemuCtrl, conf_params.pg_rd_lat, 40000),
+    DEFINE_PROP_INT32("pg_wr_lat", FemuCtrl, conf_params.pg_wr_lat, 200000),
+    DEFINE_PROP_INT32("blk_er_lat", FemuCtrl, conf_params.blk_er_lat, 2000000),
+    DEFINE_PROP_INT32("ch_xfer_lat", FemuCtrl, conf_params.ch_xfer_lat, 0),
+    DEFINE_PROP_INT32("gc_thres_pcent", FemuCtrl, conf_params.gc_thres_pcent, 75),
+    DEFINE_PROP_INT32("gc_thres_pcent_high", FemuCtrl, conf_params.gc_thres_pcent_high, 95),
     DEFINE_PROP_END_OF_LIST(),
 };
 

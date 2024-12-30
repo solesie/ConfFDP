@@ -132,7 +132,7 @@ static void nvme_process_cq_cpl(void *arg, int index_poller)
     uint64_t now;
     int processed = 0;
     int rc;
-    if (BBSSD(n)) { //|| ZNSSD(n)
+    if (BBSSD(n) || FDPSSD(n)) { //|| ZNSSD(n)
         rp = n->to_poller[index_poller];
     }
 
