@@ -123,9 +123,9 @@ struct ssdparams {
                        */
 
     double gc_thres_pcent;
-    int gc_thres_lines;
+    int gc_thres_superblocks;
     double gc_thres_pcent_high;
-    int gc_thres_lines_high;
+    int gc_thres_superblocks_high;
     bool enable_gc_delay;
 
     /* below are all calculated values */
@@ -146,10 +146,16 @@ struct ssdparams {
     int blks_per_ch;  /* # of blocks per channel */
     int tt_blks;      /* total # of blocks in the SSD */
 
-    int secs_per_line;
-    int pgs_per_line;
-    int blks_per_line;
-    int tt_line;
+    int secs_per_superblock;
+    int pgs_per_superblock;
+    int blks_per_superblock;
+    int tt_superblock;
+
+    int secs_per_ru;
+    int pgs_per_ru;
+    int blks_per_ru;
+    int tt_ru;
+    int superblocks_per_ru;
 
     int pls_per_ch;   /* # of planes per channel */
     int tt_pls;       /* total # of planes in the SSD */
@@ -157,47 +163,68 @@ struct ssdparams {
     int tt_luns;      /* total # of LUNs in the SSD */
 
     struct {
-        uint64_t runs;              // Reclaim Unit Size in bytes
-        int nrg;
-        int chs_per_rg;
-        int ways_per_rg;
+        uint16_t nrg;
+        uint16_t chs_per_rg;
+        uint16_t ways_per_rg;
 
-        int nruh;
-        int rgif;                  // Reclaim Group Identifier
+        uint16_t nruh;
     } fdp;
 };
 
-typedef struct line {
-    int id;  /* line id, the same as corresponding block id */
-    int ipc; /* invalid page count in this line */
-    int vpc; /* valid page count in this line */
-    QTAILQ_ENTRY(line) entry; /* in either {free,victim,full} list */
-    /* position in the priority queue for victim lines */
-    size_t                  pos;
-} line;
+enum SuperblockOwner{
+    SBO_UNOWNED,
+    SBO_INITIALLY_ISOLATED_RUH,
+    SBO_RG,
+    SBO_PERSISTENTLY_ISOLATED_RUH,
+};
+
+typedef struct Superblock {
+    /* solesie: superblock id.
+       rg + offt are enough to indicate unique sb */
+    union {
+        struct {
+            uint8_t rg;
+            uint32_t offt;
+
+            uint8_t sbo;
+            uint16_t ruh;
+        } n;
+        uint64_t sb_id;
+    };
+
+    int ipc; /* invalid page count in this superblock */
+    int vpc; /* valid page count in this superblock */
+    QTAILQ_ENTRY(Superblock) entry; /* in either {free,victim,full} list */
+    /* position in the priority queue for victim Superblock */
+    size_t                  pos; 
+} Superblock;
 
 /* wp: record next write addr */
-struct write_pointer {
-    struct line *curline;
+typedef struct WritePointer {
+    struct Superblock *cur_sb;
     int ch;
     int lun;
     int pg;
     int blk;
     int pl;
-};
+} WritePointer;
 
-struct line_mgmt {
-    struct line *lines;
-    /* free line list, we only need to maintain a list of blk numbers */
-    QTAILQ_HEAD(free_line_list, line) free_line_list;
-    pqueue_t *victim_line_pq;
-    //QTAILQ_HEAD(victim_line_list, line) victim_line_list;
-    QTAILQ_HEAD(full_line_list, line) full_line_list;
-    int tt_lines;
-    int free_line_cnt;
-    int victim_line_cnt;
-    int full_line_cnt;
-};
+typedef struct ReclaimGroup {
+    Superblock *superblocks;
+    /* free superblock list, we only need to maintain a list of superblock numbers */
+    QTAILQ_HEAD(free_superblock_list, Superblock) free_superblock_list;
+    pqueue_t *victim_superblock_pq;
+    QTAILQ_HEAD(full_superblock_list, Superblock) full_superblock_list;
+
+    int tt_superblock;
+    int free_superblock_cnt;
+    int victim_superblock_cnt;
+    int full_superblock_cnt;
+    WritePointer *wp; // solesie: This WP is used for INITIALLY ISOLATED GC.
+
+    int start_ch, end_ch;
+    int start_way, end_way;
+} ReclaimGroup;
 
 struct nand_cmd {
     int type;
@@ -205,34 +232,11 @@ struct nand_cmd {
     int64_t stime; /* Coperd: request arrival time */
 };
 
-
-
-
-typedef struct NvmeReclaimUnit {
-    uint64_t ruamw;
-} NvmeReclaimUnit;
-
-typedef struct NvmeRuHandle {
-    uint8_t  ruht;
-    uint8_t  ruha;
-    uint64_t event_filter;
-    uint8_t  lbafi;
-    uint64_t ruamw;
-
-    /* reclaim units indexed by reclaim group */
-    NvmeReclaimUnit *rus;
-} NvmeRuHandle;
-
-enum NvmeRuhType {
-    NVME_RUHT_INITIALLY_ISOLATED = 1,
-    NVME_RUHT_PERSISTENTLY_ISOLATED = 2,
-};
-
-enum NvmeRuhAttributes {
-    NVME_RUHA_UNUSED = 0,
-    NVME_RUHA_HOST = 1,
-    NVME_RUHA_CTRL = 2,
-};
+typedef struct ReclaimUnitHandle {
+    /* solesie: These WPs are used to point to RUs indexed by RG 
+       and are also used for PERSISTENT ISOLATED GC.*/
+    WritePointer *wps;
+} ReclaimUnitHandle;
 
 struct fdpssd {
     char *ssdname;
@@ -241,10 +245,10 @@ struct fdpssd {
     struct ppa *maptbl; /* page level mapping table */
     uint64_t *rmap;     /* reverse mapptbl, assume it's stored in OOB */
 
-    /* solesie: TODO */
-    NvmeRuHandle *ruhs;
-    struct write_pointer wp;
-    struct line_mgmt lm;
+    /* solesie: FDP */
+    ReclaimUnitHandle *ruhs;
+    ReclaimGroup *rgs;
+    int **chway2rg;
 
     /* lockless ring for communication with NVMe IO thread */
     struct rte_ring **to_ftl;

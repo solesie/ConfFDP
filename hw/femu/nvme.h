@@ -556,11 +556,6 @@ typedef struct NvmeIdentity {
     uint32_t    rsvd12[4];
 } NvmeIdentify;
 
-/**
- * solesie: TODO: Following needs to be considered to support FDP and NS.
- * 1. Whether to apply NS end to end protection(LBTU, PRINFO, apptag, appmask ...)
- * 2. How to implement control.CETYPE to apply FDP
- */
 typedef struct NvmeRwCmd {
     uint8_t     opcode;
     uint8_t     flags;
@@ -573,7 +568,9 @@ typedef struct NvmeRwCmd {
     uint64_t    slba;
     uint16_t    nlb;
     uint16_t    control;
-    uint32_t    dsmgmt;
+    uint8_t     dsmgmt;
+    uint8_t     rsvd;
+    uint16_t    dspec;
     uint32_t    reftag;
     uint16_t    apptag;
     uint16_t    appmask;
@@ -775,6 +772,11 @@ enum NvmeStatusCodes {
  * solesie: Define macros for Identify I/O Command Set data structure (CNS 1Ch)
  */
 #define NVME_SET_CSI(vec, csi) (vec |= (uint8_t)(1 << (csi)))
+
+enum NvmeDirectiveTypes {
+    NVME_DIRECTIVE_IDENTIFY       = 0x0,
+    NVME_DIRECTIVE_DATA_PLACEMENT = 0x2,
+};
 
 /**
  * solesie: Firmware Slot Information (Log Page Identifier 03h)
@@ -1303,6 +1305,11 @@ typedef struct NvmeRequest {
 
     /* position in the priority queue for delay emulation */
     size_t                  pos;
+
+    struct {
+        uint16_t ruh_id;
+        uint16_t rg_id;
+    } fdp;
 } NvmeRequest;
 
 typedef struct DMAOff {
@@ -1373,6 +1380,20 @@ typedef struct NvmeZone NvmeZone;
 
 
 
+typedef struct NvmeReclaimUnit {
+    uint64_t ruamw; // solesie: Reclaim Unit Available Media Writes(in # of logical blocks)
+} NvmeReclaimUnit;
+
+typedef struct NvmeRuHandle {
+    uint8_t  ruht;
+    uint8_t  ruha;
+    uint64_t event_filter;
+    uint8_t  lbafi;
+    uint64_t ruamw;
+
+    /* reclaim units indexed by reclaim group */
+    NvmeReclaimUnit *rus;
+} NvmeRuHandle;
 
 #define NVME_FDP_MAX_EVENTS 63
 
@@ -1404,13 +1425,50 @@ typedef struct NvmeEnduranceGroup {
     struct {
         NvmeFdpEventBuffer host_events, ctrl_events;
 
+        uint16_t nruh;
+        uint16_t nrg;
+        uint8_t  rgif;
+        uint64_t runs;
+
         uint64_t hbmw;                  // Host Bytes with Metadata Written (not include GC)
         uint64_t mbmw;                  // Media Bytes with Metadata Written
         uint64_t mbe;                   // Media Bytes Erased
 
         bool enabled;
+
+        NvmeRuHandle *ruhs;
     } fdp;
 } NvmeEnduranceGroup;
+
+enum NvmeIomr2Mo {
+    NVME_IOMR_MO_NOP = 0x0,
+    NVME_IOMR_MO_RUH_STATUS = 0x1,
+    NVME_IOMR_MO_VENDOR_SPECIFIC = 0x255,
+};
+
+enum NvmeRuhType {
+    NVME_RUHT_INITIALLY_ISOLATED = 1,
+    NVME_RUHT_PERSISTENTLY_ISOLATED = 2,
+};
+
+enum NvmeRuhAttributes {
+    NVME_RUHA_UNUSED = 0,
+    NVME_RUHA_HOST = 1,
+    NVME_RUHA_CTRL = 2,
+};
+
+typedef struct QEMU_PACKED NvmeRuhStatus {
+    uint8_t  rsvd0[14];
+    uint16_t nruhsd;
+} NvmeRuhStatus;
+
+typedef struct QEMU_PACKED NvmeRuhStatusDescr {
+    uint16_t pid;
+    uint16_t ruhid;
+    uint32_t earutr;
+    uint64_t ruamw;
+    uint8_t  rsvd16[16];
+} NvmeRuhStatusDescr;
 
 
 
@@ -1847,6 +1905,8 @@ void nvme_process_sq_admin(void *opaque);
 void nvme_post_cqes_io(void *opaque);
 void nvme_create_poller(FemuCtrl *n);
 
+void nvme_init_endgrp(FemuCtrl *n);
+
 /* NVMe I/O */
 uint16_t nvme_rw(FemuCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd, NvmeRequest *req);
 
@@ -1858,7 +1918,7 @@ int nvme_register_znssd(FemuCtrl *n);
 int nvme_register_fdpssd(FemuCtrl *n);
 
 /**
- * solesie: get num of lab blks of ns
+ * solesie: get num of lba blks of ns
  */
 static inline uint64_t ns_blks(NvmeNamespace *ns, uint8_t lba_idx)
 {

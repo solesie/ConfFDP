@@ -4,14 +4,14 @@
 
 static void *ftl_thread(void *arg);
 
-static inline bool should_gc(struct fdpssd *fdpssd)
+static inline bool should_gc(struct fdpssd *fdpssd, int rg_id)
 {
-    return (fdpssd->lm.free_line_cnt <= fdpssd->sp.gc_thres_lines);
+    return (fdpssd->rgs[rg_id].free_superblock_cnt <= fdpssd->sp.gc_thres_superblocks);
 }
 
-static inline bool should_gc_high(struct fdpssd *fdpssd)
+static inline bool should_gc_high(struct fdpssd *fdpssd, int rg_id)
 {
-    return (fdpssd->lm.free_line_cnt <= fdpssd->sp.gc_thres_lines_high);
+    return (fdpssd->rgs[rg_id].free_superblock_cnt <= fdpssd->sp.gc_thres_superblocks_high);
 }
 
 static inline struct ppa get_maptbl_ent(struct fdpssd *fdpssd, uint64_t lpn)
@@ -56,81 +56,143 @@ static inline void set_rmap_ent(struct fdpssd *fdpssd, uint64_t lpn, struct ppa 
     fdpssd->rmap[pgidx] = lpn;
 }
 
-static inline int victim_line_cmp_pri(pqueue_pri_t next, pqueue_pri_t curr)
+static inline int victim_superblock_cmp_pri(pqueue_pri_t next, pqueue_pri_t curr)
 {
     return (next > curr);
 }
 
-static inline pqueue_pri_t victim_line_get_pri(void *a)
+static inline pqueue_pri_t victim_superblock_get_pri(void *a)
 {
-    return ((struct line *)a)->vpc;
+    return ((struct Superblock *)a)->vpc;
 }
 
-static inline void victim_line_set_pri(void *a, pqueue_pri_t pri)
+static inline void victim_superblock_set_pri(void *a, pqueue_pri_t pri)
 {
-    ((struct line *)a)->vpc = pri;
+    ((struct Superblock *)a)->vpc = pri;
 }
 
-static inline size_t victim_line_get_pos(void *a)
+static inline size_t victim_superblock_get_pos(void *a)
 {
-    return ((struct line *)a)->pos;
+    return ((struct Superblock *)a)->pos;
 }
 
-static inline void victim_line_set_pos(void *a, size_t pos)
+static inline void victim_superblock_set_pos(void *a, size_t pos)
 {
-    ((struct line *)a)->pos = pos;
+    ((struct Superblock *)a)->pos = pos;
 }
 
-static void ssd_init_lines(struct fdpssd *fdpssd)
+static void fdpssd_init_reclaim_groups(struct fdpssd *fdpssd)
 {
     struct ssdparams *spp = &fdpssd->sp;
-    struct line_mgmt *lm = &fdpssd->lm;
-    struct line *line;
+    int nrg = spp->fdp.nrg;
+    
+    fdpssd->rgs = g_malloc0(sizeof(struct ReclaimGroup) * nrg);
 
-    lm->tt_lines = spp->blks_per_pl;
-    ftl_assert(lm->tt_lines == spp->tt_line);
-    lm->lines = g_malloc0(sizeof(struct line) * lm->tt_lines);
+    ReclaimGroup *rgs = fdpssd->rgs;
+    Superblock *sb;
 
-    QTAILQ_INIT(&lm->free_line_list);
-    lm->victim_line_pq = pqueue_init(spp->tt_line, victim_line_cmp_pri,
-            victim_line_get_pri, victim_line_set_pri,
-            victim_line_get_pos, victim_line_set_pos);
-    QTAILQ_INIT(&lm->full_line_list);
+    for(int rg_id = 0; rg_id < nrg; ++rg_id) {
+        rgs[rg_id].tt_superblock = spp->blks_per_pl;
+        ftl_assert(rgs[rg_id].tt_superblock == spp->tt_superblock);
+        rgs[rg_id].superblocks = g_malloc0(sizeof(struct Superblock) * rgs[rg_id].tt_superblock);
 
-    lm->free_line_cnt = 0;
-    for (int i = 0; i < lm->tt_lines; i++) {
-        line = &lm->lines[i];
-        line->id = i;
-        line->ipc = 0;
-        line->vpc = 0;
-        line->pos = 0;
-        /* initialize all the lines as free lines */
-        QTAILQ_INSERT_TAIL(&lm->free_line_list, line, entry);
-        lm->free_line_cnt++;
+        QTAILQ_INIT(&rgs[rg_id].free_superblock_list);
+        rgs[rg_id].victim_superblock_pq = pqueue_init(rgs[rg_id].tt_superblock, victim_superblock_cmp_pri,
+            victim_superblock_get_pri, victim_superblock_set_pri,
+            victim_superblock_get_pos, victim_superblock_set_pos);
+        QTAILQ_INIT(&rgs[rg_id].full_superblock_list);
+
+        rgs[rg_id].free_superblock_cnt = 0;
+        for(int i = 0; i < rgs[rg_id].tt_superblock; ++i){
+            sb = &rgs[rg_id].superblocks[i];
+            sb->n.sbo = SBO_UNOWNED;
+            sb->n.rg = rg_id;
+            sb->n.offt = i;
+            sb->ipc = 0;
+            sb->vpc = 0;
+            sb->pos = 0;
+            /* initialize all the superblocks as free superblocks */
+            QTAILQ_INSERT_TAIL(&rgs[rg_id].free_superblock_list, sb, entry);
+            rgs[rg_id].free_superblock_cnt++;
+        }
+
+        ftl_assert(rgs[rg_id].free_superblock_cnt == rgs[rg_id].tt_superblock);
+        rgs[rg_id].victim_superblock_cnt = 0;
+        rgs[rg_id].full_superblock_cnt = 0;
+        rgs[rg_id].wp = g_malloc0(sizeof(struct WritePointer));
+        sb = QTAILQ_FIRST(&rgs[rg_id].free_superblock_list);
+        QTAILQ_REMOVE(&rgs[rg_id].free_superblock_list, sb, entry);
+        sb->n.sbo = SBO_RG;
+        --rgs[rg_id].free_superblock_cnt;
+
+        rgs[rg_id].wp->cur_sb = sb;
+        rgs[rg_id].wp->ch = rgs[rg_id].start_ch;
+        rgs[rg_id].wp->lun = rgs[rg_id].start_way;
+        rgs[rg_id].wp->pg = 0;
+        rgs[rg_id].wp->blk = 0;
+        rgs[rg_id].wp->pl = 0;
+
+        /* solesie: only continuous 2D reclaim group is supported */
+        rgs[rg_id].start_ch = (rg_id * spp->fdp.chs_per_rg) % spp->nchs;
+        rgs[rg_id].end_ch = rgs[rg_id].start_ch + spp->fdp.chs_per_rg - 1;
+        rgs[rg_id].start_way = ((rg_id * spp->fdp.chs_per_rg) / spp->nchs) * spp->fdp.ways_per_rg;
+        rgs[rg_id].end_way = rgs[rg_id].start_way + spp->fdp.ways_per_rg - 1;
     }
-
-    ftl_assert(lm->free_line_cnt == lm->tt_lines);
-    lm->victim_line_cnt = 0;
-    lm->full_line_cnt = 0;
 }
 
-static void ssd_init_write_pointer(struct fdpssd *fdpssd)
+static void fdpssd_init_ruh(struct fdpssd *fdpssd)
 {
-    struct write_pointer *wpp = &fdpssd->wp;
-    struct line_mgmt *lm = &fdpssd->lm;
-    struct line *curline = NULL;
+    struct ssdparams *spp = &fdpssd->sp;
+    ReclaimGroup *rgs = fdpssd->rgs;
+    Superblock *cur_sb = NULL;
+    WritePointer *wp = NULL;
 
-    curline = QTAILQ_FIRST(&lm->free_line_list);
-    QTAILQ_REMOVE(&lm->free_line_list, curline, entry);
-    lm->free_line_cnt--;
+    fdpssd->ruhs = g_malloc0(sizeof(ReclaimUnitHandle) * spp->fdp.nruh);
 
-    /* wpp->curline is always our next-to-write super-block */
-    wpp->curline = curline;
-    wpp->ch = 0;
-    wpp->lun = 0;
-    wpp->pg = 0;
-    wpp->blk = 0;
-    wpp->pl = 0;
+    for (uint16_t ruh_id = 0; ruh_id < spp->fdp.nruh; ++ruh_id) {
+        /* solesie: init ruh write pointers for each rg. */
+        fdpssd->ruhs[ruh_id].wps = g_malloc0(sizeof(struct WritePointer) * spp->fdp.nrg);
+        for (uint16_t rg_id = 0; rg_id < spp->fdp.nrg; ++rg_id) {
+            cur_sb = QTAILQ_FIRST(&rgs[rg_id].free_superblock_list);
+            QTAILQ_REMOVE(&rgs[rg_id].free_superblock_list, cur_sb, entry);
+            --rgs[rg_id].free_superblock_cnt;
+            cur_sb->n.sbo = SBO_INITIALLY_ISOLATED_RUH;
+            cur_sb->n.ruh = ruh_id;
+
+            wp = &fdpssd->ruhs[ruh_id].wps[rg_id];
+            wp->cur_sb = cur_sb;
+
+            wp->ch = rgs[rg_id].start_ch;
+            wp->lun = rgs[rg_id].start_way;
+            wp->pg = 0;
+            wp->blk = 0;
+            wp->pl = 0;
+        }
+    }
+}
+
+/* solesie: This function initializes chway2rg.
+   chway2rg is used to determine which RG a LUN belongs to.
+   This function should be called after fdpssd_init_ch() and fdpssd_init_reclaim_group(). */
+static void fdpssd_init_chway2rg(struct fdpssd *fdpssd)
+{
+    struct ssdparams *spp = &fdpssd->sp;
+    ReclaimGroup *rgs = fdpssd->rgs;
+
+    fdpssd->chway2rg = g_malloc0(sizeof(int *) * spp->nchs);
+    for(int ch = 0; ch < spp->nchs; ++ch){
+        fdpssd->chway2rg[ch] = g_malloc0(sizeof(int) * spp->luns_per_ch);
+        for(int way = 0; way < spp->luns_per_ch; ++way){
+            /* solesie: find RG */
+            for(int rg_id = 0; rg_id < spp->fdp.nrg; ++rg_id) {
+                if(rgs[rg_id].start_ch <= ch && ch <= rgs[rg_id].end_ch && 
+                rgs[rg_id].start_way <= way && way <= rgs[rg_id].end_way){
+                    fdpssd->chway2rg[ch][way] = rg_id;
+                    break;
+                }
+            }
+        }
+    }
 }
 
 static inline void check_addr(int a, int max)
@@ -138,104 +200,101 @@ static inline void check_addr(int a, int max)
     ftl_assert(a >= 0 && a < max);
 }
 
-static struct line *get_next_free_line(struct fdpssd *fdpssd)
+static struct Superblock *get_next_free_superblock(struct fdpssd *fdpssd, int rg_id)
 {
-    struct line_mgmt *lm = &fdpssd->lm;
-    struct line *curline = NULL;
+    ReclaimGroup *rg = &fdpssd->rgs[rg_id];
+    Superblock *cur_sb = NULL;
 
-    curline = QTAILQ_FIRST(&lm->free_line_list);
-    if (!curline) {
-        ftl_err("No free lines left in [%s] !!!!\n", fdpssd->ssdname);
+    cur_sb = QTAILQ_FIRST(&rg->free_superblock_list);
+    ftl_assert(cur_sb->n.sbo == SBO_UNOWNED);
+    if (!cur_sb) {
+        ftl_err("No free superblocks left in [%s] !!!!\n", fdpssd->ssdname);
         return NULL;
     }
 
-    QTAILQ_REMOVE(&lm->free_line_list, curline, entry);
-    lm->free_line_cnt--;
-    return curline;
+    QTAILQ_REMOVE(&rg->free_superblock_list, cur_sb, entry);
+    rg->free_superblock_cnt--;
+    return cur_sb;
 }
+
 /**
  * @brief 
  * ssd_advance_write_pointer 
  * get write pointer from fdpssd sturcture and add +1 for each member respectively 
  * write pointer has a member which indicates each component of fdpssd and exposed by it's number
  * this function  
- * struct line *curline;
+ * struct Superblock *cur_sb;
  * int ch;
  * int lun;
  * int pg;
  * int blk;
  * int pl;
- * 
  */
-
-static void ssd_advance_write_pointer(struct fdpssd *fdpssd)
+static void ssd_advance_write_pointer(struct fdpssd *fdpssd, WritePointer *wp)
 {
     struct ssdparams *spp = &fdpssd->sp;
-    struct write_pointer *wpp = &fdpssd->wp;
-    struct line_mgmt *lm = &fdpssd->lm;
+    int rg_id = wp->cur_sb->n.rg;
+    ReclaimGroup *rg = &fdpssd->rgs[rg_id];
+    uint8_t sbo = wp->cur_sb->n.sbo;
+    uint16_t ruh = wp->cur_sb->n.ruh;
 
-    check_addr(wpp->ch, spp->nchs);
-    wpp->ch++;      //wpp->ch means channel #(int) for current write pointer
-    if (wpp->ch == spp->nchs) { 
-        //spp->nchs means max # of channels in fdpssd
-        //so if wpp->ch += 1 equals fdpssd's max channel 
-        // then fdpssd is currently saturated
-        // so simply set wp's ch to 0, which means using channels in circular manner 
-        wpp->ch = 0;    
-        check_addr(wpp->lun, spp->luns_per_ch);
-        wpp->lun++;
+    ftl_assert(rg->start_ch <= wp->ch && wp->ch <= rg->end_ch);
+    wp->ch++;      //wp->ch means channel #(int) for current write pointer
+    if (wp->ch == rg->end_ch + 1) {
+        wp->ch = rg->start_ch;
+        ftl_assert(rg->start_way <= wp->lun && wp->lun <= rg->end_way);
+        wp->lun++;
         /* in this case, we should go to next lun */
-        if (wpp->lun == spp->luns_per_ch) {
-            wpp->lun = 0;
+        if (wp->lun == rg->end_way + 1) {
+            wp->lun = rg->start_way;
             /* go to next page in the block */
-            check_addr(wpp->pg, spp->pgs_per_blk);
-            wpp->pg++;
-            if (wpp->pg == spp->pgs_per_blk) {
-                wpp->pg = 0;
-                /* move current line to {victim,full} line list */
-                if (wpp->curline->vpc == spp->pgs_per_line) {
-                    /* all pgs are still valid, move to full line list */
-                    ftl_assert(wpp->curline->ipc == 0);
-                    QTAILQ_INSERT_TAIL(&lm->full_line_list, wpp->curline, entry);
-                    lm->full_line_cnt++;
+            ftl_assert(0 <= wp->pg && wp->pg < spp->pgs_per_blk);
+            wp->pg++;
+            if(wp->pg == spp->pgs_per_blk){
+                wp->pg = 0;
+                /* move current superblock to {victim,full} superblock list */
+                if (wp->cur_sb->vpc == spp->pgs_per_superblock) {
+                    ftl_assert(wp->cur_sb->ipc == 0);
+                    QTAILQ_INSERT_TAIL(&rg->full_superblock_list, wp->cur_sb, entry);
+                    rg->full_superblock_cnt++;
                 } else {
-                    ftl_assert(wpp->curline->vpc >= 0 && wpp->curline->vpc < spp->pgs_per_line);
-                    /* there must be some invalid pages in this line */
-                    ftl_assert(wpp->curline->ipc > 0);
-                    pqueue_insert(lm->victim_line_pq, wpp->curline);
-                    lm->victim_line_cnt++;
+                    ftl_assert(wp->cur_sb->vpc >= 0 && wp->cur_sb->vpc < spp->pgs_per_superblock);
+                    ftl_assert(wp->cur_sb->ipc > 0);
+                    pqueue_insert(rg->victim_superblock_pq, wp->cur_sb);
+                    rg->victim_superblock_cnt++;
                 }
-                /* current line is used up, pick another empty line */
-                check_addr(wpp->blk, spp->blks_per_pl);
-                wpp->curline = NULL;
-                wpp->curline = get_next_free_line(fdpssd);
-                if (!wpp->curline) {
+                /* current superblock is used up, pick another empty superblock */
+                ftl_assert(0 <= wp->blk && wp->blk < spp->blks_per_pl);
+                wp->cur_sb = NULL;
+                wp->cur_sb = get_next_free_superblock(fdpssd, rg_id);
+                if (!wp->cur_sb) {
                     /* TODO */
                     abort();
                 }
-                wpp->blk = wpp->curline->id;
-                check_addr(wpp->blk, spp->blks_per_pl);
+                wp->cur_sb->n.sbo = sbo;
+                wp->cur_sb->n.ruh = ruh;
+
+                wp->blk = wp->cur_sb->n.offt;
                 /* make sure we are starting from page 0 in the super block */
-                ftl_assert(wpp->pg == 0);
-                ftl_assert(wpp->lun == 0);
-                ftl_assert(wpp->ch == 0);
+                ftl_assert(wp->pg == 0);
+                ftl_assert(wp->lun == rg->start_way);
+                ftl_assert(wp->ch == rg->start_ch);
                 /* TODO: assume # of pl_per_lun is 1, fix later */
-                ftl_assert(wpp->pl == 0);
+                ftl_assert(wp->pl == 0);
             }
         }
     }
 }
 
-static struct ppa get_new_page(struct fdpssd *fdpssd)
+static struct ppa get_new_page(WritePointer *wp)
 {
-    struct write_pointer *wpp = &fdpssd->wp;
     struct ppa ppa;
     ppa.ppa = 0;
-    ppa.g.ch = wpp->ch;
-    ppa.g.lun = wpp->lun;
-    ppa.g.pg = wpp->pg;
-    ppa.g.blk = wpp->blk;
-    ppa.g.pl = wpp->pl;
+    ppa.g.ch = wp->ch;
+    ppa.g.lun = wp->lun;
+    ppa.g.pg = wp->pg;
+    ppa.g.blk = wp->blk;
+    ppa.g.pl = wp->pl;
     ftl_assert(ppa.g.pl == 0);
 
     return ppa;
@@ -249,38 +308,6 @@ static void check_params(struct ssdparams *spp, uint64_t dev_sz)
      */
     // ftl_assert(is_power_of_2(spp->luns_per_ch));
     //ftl_assert(is_power_of_2(spp->nchs));
-
-    // solesie: A RU(line) should include at least one blk per chip.
-    assert(spp->blks_per_line >= spp->tt_luns / spp->fdp.nrg);
-
-    assert(spp->fdp.runs * spp->tt_line == dev_sz);
-}
-
-static void nvme_calc_rgif(int nruh, int nrg, int *rgif)
-{
-    int val;
-    unsigned int i;
-
-    if (unlikely(nrg == 1)) {
-        /* PIDRG_NORGI scenario, all of pid is used for PHID */
-        *rgif = 0;
-        return;
-    }
-
-    val = nrg;
-    i = 0;
-    while (val) {
-        val >>= 1;
-        i++;
-    }
-    *rgif = i;
-    
-    /* ensure remaining bits suffice to represent number of phids in a RG */
-    if (unlikely((UINT16_MAX >> i) < nruh)) {
-        *rgif = 0;
-        return;
-    }
-    return;
 }
 
 static void fdpssd_init_params(struct ssdparams *spp, FemuCtrl *n)
@@ -326,28 +353,21 @@ static void fdpssd_init_params(struct ssdparams *spp, FemuCtrl *n)
 
     spp->tt_luns = spp->luns_per_ch * spp->nchs;
 
+    spp->blks_per_superblock = spp->tt_luns; /* TODO: to fix under multiplanes */
+    spp->pgs_per_superblock = spp->blks_per_superblock * spp->pgs_per_blk;
+    spp->secs_per_superblock = spp->pgs_per_superblock * spp->secs_per_pg;
+    spp->tt_superblock = spp->blks_per_lun; /* TODO: to fix under multiplanes */
+
     /* fdp */
-    spp->fdp.runs = fdp_params->runs;
     spp->fdp.nrg = fdp_params->nrg;
     spp->fdp.nruh = fdp_params->nruh;
     spp->fdp.chs_per_rg = fdp_params->chs_per_rg;
     spp->fdp.ways_per_rg = fdp_params->ways_per_rg;
-    nvme_calc_rgif(spp->fdp.nruh, spp->fdp.nrg, &spp->fdp.rgif);
 
-    /* line is special, put it at the end */
-    /* See line as RU */
-    spp->blks_per_line = (int) (spp->fdp.runs / blk_sz);
-    spp->pgs_per_line = spp->blks_per_line * spp->pgs_per_blk;
-    spp->secs_per_line = spp->pgs_per_line * spp->secs_per_pg;
-    spp->tt_line = spp->blks_per_lun * spp->tt_luns / spp->blks_per_line;
-
-    femu_log("%d %d %d %d\n", spp->blks_per_line, spp->pgs_per_line, spp->secs_per_line, spp->tt_line);
-    femu_log("%d %d %d %d\n", spp->tt_luns, spp->blks_per_line * spp->pgs_per_blk, spp->pgs_per_line * spp->secs_per_pg, spp->blks_per_lun);
-
-    spp->gc_thres_pcent = spp->gc_thres_pcent / 100.0;
-    spp->gc_thres_lines = (int)((1 - spp->gc_thres_pcent) * (spp->tt_line / spp->fdp.nrg));
-    spp->gc_thres_pcent_high = 0.95;
-    spp->gc_thres_lines_high = (int)((1 - spp->gc_thres_pcent_high) * (spp->tt_line / spp->fdp.nrg));
+    spp->gc_thres_pcent = conf_params->gc_thres_pcent / 100.0;
+    spp->gc_thres_superblocks = (int)((1 - spp->gc_thres_pcent) * (spp->tt_superblock / spp->fdp.nrg));
+    spp->gc_thres_pcent_high = conf_params->gc_thres_pcent_high / 100.0;
+    spp->gc_thres_superblocks_high = (int)((1 - spp->gc_thres_pcent_high) * (spp->tt_superblock / spp->fdp.nrg));
     spp->enable_gc_delay = true;
 
     check_params(spp, dev_sz);
@@ -396,7 +416,7 @@ static void ssd_init_nand_lun(struct nand_lun *lun, struct ssdparams *spp)
     lun->busy = false;
 }
 
-static void ssd_init_ch(struct ssd_channel *ch, struct ssdparams *spp)
+static void fdpssd_init_ch(struct ssd_channel *ch, struct ssdparams *spp)
 {
     ch->nluns = spp->luns_per_ch;
     ch->lun = g_malloc0(sizeof(struct nand_lun) * ch->nluns);
@@ -407,7 +427,7 @@ static void ssd_init_ch(struct ssd_channel *ch, struct ssdparams *spp)
     ch->busy = 0;
 }
 
-static void ssd_init_maptbl(struct fdpssd *fdpssd)
+static void fdpssd_init_maptbl(struct fdpssd *fdpssd)
 {
     struct ssdparams *spp = &fdpssd->sp;
 
@@ -417,27 +437,13 @@ static void ssd_init_maptbl(struct fdpssd *fdpssd)
     }
 }
 
-static void ssd_init_rmap(struct fdpssd *fdpssd)
+static void fdpssd_init_rmap(struct fdpssd *fdpssd)
 {
     struct ssdparams *spp = &fdpssd->sp;
 
     fdpssd->rmap = g_malloc0(sizeof(uint64_t) * spp->tt_pgs);
     for (int i = 0; i < spp->tt_pgs; i++) {
         fdpssd->rmap[i] = INVALID_LPN;
-    }
-}
-
-static void fdpssd_init_fdp(struct fdpssd *fdpssd)
-{
-    fdpssd->ruhs = g_new0(NvmeRuHandle, fdpssd->sp.fdp.nruh);
-
-    for (uint16_t ruhid = 0; ruhid < fdpssd->sp.fdp.nruh; ruhid++) {
-        fdpssd->ruhs[ruhid] = (NvmeRuHandle) {
-            .ruht = NVME_RUHT_INITIALLY_ISOLATED,
-            .ruha = NVME_RUHA_UNUSED,
-        };
-
-        fdpssd->ruhs[ruhid].rus = g_new0(NvmeReclaimUnit, fdpssd->sp.fdp.nrg);
     }
 }
 
@@ -449,25 +455,26 @@ void fdpssd_init(FemuCtrl *n)
     ftl_assert(fdpssd);
 
     fdpssd_init_params(spp, n);
-    fdpssd_init_fdp(fdpssd);
 
     /* initialize fdpssd internal layout architecture */
     fdpssd->ch = g_malloc0(sizeof(struct ssd_channel) * spp->nchs);
     for (int i = 0; i < spp->nchs; i++) {
-        ssd_init_ch(&fdpssd->ch[i], spp);
+        fdpssd_init_ch(&fdpssd->ch[i], spp);
     }
 
     /* initialize maptbl */
-    ssd_init_maptbl(fdpssd);
+    fdpssd_init_maptbl(fdpssd);
 
     /* initialize rmap */
-    ssd_init_rmap(fdpssd);
+    fdpssd_init_rmap(fdpssd);
 
-    /* initialize all the lines */
-    ssd_init_lines(fdpssd);
+    /* initialize all the rg and sb */
+    fdpssd_init_reclaim_groups(fdpssd);
 
-    /* initialize write pointer, this is how we allocate new pages for writes */
-    ssd_init_write_pointer(fdpssd);
+    /* initialize ruh and write pointer, this is how we allocate new pages for writes */
+    fdpssd_init_ruh(fdpssd);
+
+    fdpssd_init_chway2rg(fdpssd);
 
     qemu_thread_create(&fdpssd->ftl_thread, "FEMU-FTL-Thread", ftl_thread, n,
                        QEMU_THREAD_JOINABLE);
@@ -542,9 +549,15 @@ static inline struct nand_block *get_blk(struct fdpssd *fdpssd, struct ppa *ppa)
     return &(pl->blk[ppa->g.blk]);
 }
 
-static inline struct line *get_line(struct fdpssd *fdpssd, struct ppa *ppa)
+static inline int get_reclaim_group_id(struct fdpssd *fdpssd, struct ppa *ppa)
 {
-    return &(fdpssd->lm.lines[ppa->g.blk]);
+    return fdpssd->chway2rg[ppa->g.ch][ppa->g.lun];
+}
+
+static inline struct Superblock *get_superblock(struct fdpssd *fdpssd, struct ppa *ppa)
+{
+    int rg = get_reclaim_group_id(fdpssd, ppa);
+    return &(fdpssd->rgs[rg].superblocks[ppa->g.blk]);
 }
 
 static inline struct nand_page *get_pg(struct fdpssd *fdpssd, struct ppa *ppa)
@@ -631,12 +644,13 @@ static uint64_t ssd_advance_status(struct fdpssd *fdpssd, struct ppa *ppa, struc
 /* update SSD status about one page from PG_VALID -> PG_VALID */
 static void mark_page_invalid(struct fdpssd *fdpssd, struct ppa *ppa)
 {
-    struct line_mgmt *lm = &fdpssd->lm;
+    int rg_id = get_reclaim_group_id(fdpssd, ppa);
+    ReclaimGroup *rg = &fdpssd->rgs[rg_id];
     struct ssdparams *spp = &fdpssd->sp;
     struct nand_block *blk = NULL;
     struct nand_page *pg = NULL;
-    bool was_full_line = false;
-    struct line *line;
+    bool was_full_sb = false;
+    Superblock *sb;
 
     /* update corresponding page status */
     pg = get_pg(fdpssd, ppa);
@@ -650,29 +664,29 @@ static void mark_page_invalid(struct fdpssd *fdpssd, struct ppa *ppa)
     ftl_assert(blk->vpc > 0 && blk->vpc <= spp->pgs_per_blk);
     blk->vpc--;
 
-    /* update corresponding line status */
-    line = get_line(fdpssd, ppa);
-    ftl_assert(line->ipc >= 0 && line->ipc < spp->pgs_per_line);
-    if (line->vpc == spp->pgs_per_line) {
-        ftl_assert(line->ipc == 0);
-        was_full_line = true;
+    /* update corresponding superblock status */
+    sb = get_superblock(fdpssd, ppa);
+    ftl_assert(sb->ipc >= 0 && sb->ipc < spp->pgs_per_superblock);
+    if (sb->vpc == spp->pgs_per_superblock) {
+        ftl_assert(sb->ipc == 0);
+        was_full_sb = true;
     }
-    line->ipc++;
-    ftl_assert(line->vpc > 0 && line->vpc <= spp->pgs_per_line);
-    /* Adjust the position of the victime line in the pq under over-writes */
-    if (line->pos) {
-        /* Note that line->vpc will be updated by this call */
-        pqueue_change_priority(lm->victim_line_pq, line->vpc - 1, line);
+    sb->ipc++;
+    ftl_assert(sb->vpc > 0 && sb->vpc <= spp->pgs_per_superblock);
+    /* Adjust the position of the victime superblock in the pq under over-writes */
+    if (sb->pos) {
+        /* Note that sb->vpc will be updated by this call */
+        pqueue_change_priority(rg->victim_superblock_pq, sb->vpc - 1, sb);
     } else {
-        line->vpc--;
+        sb->vpc--;
     }
 
-    if (was_full_line) {
-        /* move line: "full" -> "victim" */
-        QTAILQ_REMOVE(&lm->full_line_list, line, entry);
-        lm->full_line_cnt--;
-        pqueue_insert(lm->victim_line_pq, line);
-        lm->victim_line_cnt++;
+    if (was_full_sb) {
+        /* move superblock: "full" -> "victim" */
+        QTAILQ_REMOVE(&rg->full_superblock_list, sb, entry);
+        rg->full_superblock_cnt--;
+        pqueue_insert(rg->victim_superblock_pq, sb);
+        rg->victim_superblock_cnt++;
     }
 }
 
@@ -680,7 +694,7 @@ static void mark_page_valid(struct fdpssd *fdpssd, struct ppa *ppa)
 {
     struct nand_block *blk = NULL;
     struct nand_page *pg = NULL;
-    struct line *line;
+    struct Superblock *sb;
 
     /* update page status */
     pg = get_pg(fdpssd, ppa);
@@ -692,10 +706,10 @@ static void mark_page_valid(struct fdpssd *fdpssd, struct ppa *ppa)
     ftl_assert(blk->vpc >= 0 && blk->vpc < fdpssd->sp.pgs_per_blk);
     blk->vpc++;
 
-    /* update corresponding line status */
-    line = get_line(fdpssd, ppa);
-    ftl_assert(line->vpc >= 0 && line->vpc < fdpssd->sp.pgs_per_line);
-    line->vpc++;
+    /* update corresponding superblock status */
+    sb = get_superblock(fdpssd, ppa);
+    ftl_assert(sb->vpc >= 0 && sb->vpc < fdpssd->sp.pgs_per_superblock);
+    sb->vpc++;
 }
 
 static void mark_block_free(struct fdpssd *fdpssd, struct ppa *ppa)
@@ -730,15 +744,30 @@ static void gc_read_page(struct fdpssd *fdpssd, struct ppa *ppa)
     }
 }
 
-/* move valid page data (already in DRAM) from victim line to a new page */
+/* move valid page data (already in DRAM) from victim superblock to a new page */
 static uint64_t gc_write_page(struct fdpssd *fdpssd, struct ppa *old_ppa)
 {
     struct ppa new_ppa;
     struct nand_lun *new_lun;
     uint64_t lpn = get_rmap_ent(fdpssd, old_ppa);
+    struct Superblock *sb = get_superblock(fdpssd, old_ppa);
+    WritePointer *wp = NULL;
+    /* solesie: It is necessary to discuss 
+       whether Initially Isolated should be treated like Persistently Isolated 
+       under certain conditions. */
+    if(sb->n.sbo == SBO_PERSISTENTLY_ISOLATED_RUH){
+        wp = &fdpssd->ruhs[sb->n.ruh].wps[sb->n.rg];
+    }
+    else if(sb->n.sbo == SBO_INITIALLY_ISOLATED_RUH || sb->n.sbo == SBO_RG){
+        wp = fdpssd->rgs[sb->n.rg].wp;
+    }
+    else{
+        abort();
+    }
+    
 
     ftl_assert(valid_lpn(fdpssd, lpn));
-    new_ppa = get_new_page(fdpssd);
+    new_ppa = get_new_page(wp);
     /* update maptbl */
     set_maptbl_ent(fdpssd, lpn, &new_ppa);
     /* update rmap */
@@ -747,7 +776,7 @@ static uint64_t gc_write_page(struct fdpssd *fdpssd, struct ppa *old_ppa)
     mark_page_valid(fdpssd, &new_ppa);
 
     /* need to advance the write pointer here */
-    ssd_advance_write_pointer(fdpssd);
+    ssd_advance_write_pointer(fdpssd, wp);
 
     if (fdpssd->sp.enable_gc_delay) {
         struct nand_cmd gcw;
@@ -769,26 +798,26 @@ static uint64_t gc_write_page(struct fdpssd *fdpssd, struct ppa *old_ppa)
     return 0;
 }
 
-static struct line *select_victim_line(struct fdpssd *fdpssd, bool force)
+static struct Superblock *select_victim_superblock(struct fdpssd *fdpssd, int rg_id, bool force)
 {
-    struct line_mgmt *lm = &fdpssd->lm;
-    struct line *victim_line = NULL;
+    ReclaimGroup *rg = &fdpssd->rgs[rg_id];
+    Superblock *victim_sb = NULL;
 
-    victim_line = pqueue_peek(lm->victim_line_pq);
-    if (!victim_line) {
+    victim_sb = pqueue_peek(rg->victim_superblock_pq);
+    if (!victim_sb) {
         return NULL;
     }
 
-    if (!force && victim_line->ipc < fdpssd->sp.pgs_per_line / 8) {
+    if (!force && victim_sb->ipc < fdpssd->sp.pgs_per_superblock / 8) {
         return NULL;
     }
 
-    pqueue_pop(lm->victim_line_pq);
-    victim_line->pos = 0;
-    lm->victim_line_cnt--;
+    pqueue_pop(rg->victim_superblock_pq);
+    victim_sb->pos = 0;
+    rg->victim_superblock_cnt--;
 
-    /* victim_line is a danggling node now */
-    return victim_line;
+    /* victim_sb is a danggling node now */
+    return victim_sb;
 }
 
 /* here ppa identifies the block we want to clean */
@@ -814,39 +843,42 @@ static void clean_one_block(struct fdpssd *fdpssd, struct ppa *ppa)
     ftl_assert(get_blk(fdpssd, ppa)->vpc == cnt);
 }
 
-static void mark_line_free(struct fdpssd *fdpssd, struct ppa *ppa)
+static void mark_superblock_free(struct fdpssd *fdpssd, struct ppa *ppa)
 {
-    struct line_mgmt *lm = &fdpssd->lm;
-    struct line *line = get_line(fdpssd, ppa);
-    line->ipc = 0;
-    line->vpc = 0;
-    /* move this line to free line list */
-    QTAILQ_INSERT_TAIL(&lm->free_line_list, line, entry);
-    lm->free_line_cnt++;
+    int rg_id = get_reclaim_group_id(fdpssd, ppa);
+    ReclaimGroup *rg = &fdpssd->rgs[rg_id];
+    Superblock *sb = get_superblock(fdpssd, ppa);
+    sb->n.sbo = SBO_UNOWNED;
+    sb->ipc = 0;
+    sb->vpc = 0;
+    /* move this superblock to free superblock list */
+    QTAILQ_INSERT_TAIL(&rg->free_superblock_list, sb, entry);
+    rg->free_superblock_cnt++;
 }
 
-static int do_gc(struct fdpssd *fdpssd, bool force)
+static int do_gc(struct fdpssd *fdpssd, int rg_id, bool force)
 {
-    struct line *victim_line = NULL;
+    Superblock *victim_sb = NULL;
+    ReclaimGroup *rg = &fdpssd->rgs[rg_id];
     struct ssdparams *spp = &fdpssd->sp;
     struct nand_lun *lunp;
     struct ppa ppa;
     int ch, lun;
 
-    victim_line = select_victim_line(fdpssd, force);
-    if (!victim_line) {
+    victim_sb = select_victim_superblock(fdpssd, rg_id, force);
+    if (!victim_sb) {
         femu_err("FTL.c : 770 but GC doesn't happend to Inhoinno\n");
         return -1;
     }
 
-    ppa.g.blk = victim_line->id;
-    ftl_debug("GC-ing line:%d,ipc=%d,victim=%d,full=%d,free=%d\n", ppa.g.blk,
-              victim_line->ipc, fdpssd->lm.victim_line_cnt, fdpssd->lm.full_line_cnt,
-              fdpssd->lm.free_line_cnt);
+    ppa.g.blk = victim_sb->n.offt;
+    ftl_debug("GC-ing superblock:%d,ipc=%d,victim=%d,full=%d,free=%d\n", ppa.g.blk,
+              victim_sb->ipc, rg->victim_superblock_cnt, rg->full_superblock_cnt,
+              rg->free_superblock_cnt);
 
     /* copy back valid data */
-    for (ch = 0; ch < spp->nchs; ch++) {
-        for (lun = 0; lun < spp->luns_per_ch; lun++) {
+    for (ch = rg->start_ch; ch < rg->end_ch; ch++) {
+        for (lun = rg->start_way; lun < rg->end_way; lun++) {
             ppa.g.ch = ch;
             ppa.g.lun = lun;
             ppa.g.pl = 0;
@@ -867,13 +899,12 @@ static int do_gc(struct fdpssd *fdpssd, bool force)
         }
     }
 
-    /* update line status */
-    mark_line_free(fdpssd, &ppa);
+    mark_superblock_free(fdpssd, &ppa);
 
     return 0;
 }
 
-static uint64_t ssd_read(struct fdpssd *fdpssd, NvmeRequest *req)
+static uint64_t fdpssd_read(struct fdpssd *fdpssd, NvmeRequest *req)
 {
     struct ssdparams *spp = &fdpssd->sp;
     uint64_t lba = req->slba;
@@ -911,15 +942,15 @@ static uint64_t ssd_read(struct fdpssd *fdpssd, NvmeRequest *req)
 
 /**
  * @brief 
- * ssd_write  
- * static uint64_t ssd_write(sturct fdpssd * fdpssd, NvmeRequest *req)
+ * fdpssd_write  
+ * static uint64_t fdpssd_write(sturct fdpssd * fdpssd, NvmeRequest *req)
  * returns maxlat which means max latency.
  * max latency is the hightest value of latency 
  * which is calculated by ssd_advance_status per lpn(logical page number)
- * and this value is not sum of total latency but just highest latency while ssd_write()
+ * and this value is not sum of total latency but just highest latency while fdpssd_write()
  *  
  */
-static uint64_t ssd_write(struct fdpssd *fdpssd, NvmeRequest *req)
+static uint64_t fdpssd_write(struct fdpssd *fdpssd, NvmeRequest *req)
 {
     uint64_t lba = req->slba;
     struct ssdparams *spp = &fdpssd->sp;
@@ -931,14 +962,18 @@ static uint64_t ssd_write(struct fdpssd *fdpssd, NvmeRequest *req)
     uint64_t curlat = 0, maxlat = 0;
     int r;
 
+    uint16_t rg_id = req->fdp.rg_id;
+    uint16_t ruh_id = req->fdp.ruh_id;
+    WritePointer *wp = &fdpssd->ruhs[ruh_id].wps[rg_id];
+
     if (end_lpn >= spp->tt_pgs) {
         ftl_err("start_lpn=%"PRIu64",tt_pgs=%d\n", start_lpn, fdpssd->sp.tt_pgs);
     }
 
-    while (should_gc_high(fdpssd)) {
+    while (should_gc_high(fdpssd, rg_id)) {
         /* perform GC here until !should_gc(fdpssd) */
-        femu_err("In FTL.c :870 in ssd_write, GC triggered, to inhoinno");
-        r = do_gc(fdpssd, true);
+        femu_err("In FTL.c :870 in fdpssd_write, GC triggered, to inhoinno");
+        r = do_gc(fdpssd, rg_id, true);
         if (r == -1)
             break;
     }
@@ -952,7 +987,7 @@ static uint64_t ssd_write(struct fdpssd *fdpssd, NvmeRequest *req)
         }
 
         /* new write */
-        ppa = get_new_page(fdpssd);
+        ppa = get_new_page(wp);
         /* update maptbl */
         set_maptbl_ent(fdpssd, lpn, &ppa);
         /* update rmap */
@@ -961,7 +996,7 @@ static uint64_t ssd_write(struct fdpssd *fdpssd, NvmeRequest *req)
         mark_page_valid(fdpssd, &ppa);
 
         /* need to advance the write pointer here */
-        ssd_advance_write_pointer(fdpssd);
+        ssd_advance_write_pointer(fdpssd, wp);
 
         struct nand_cmd swr;
         swr.type = USER_IO;
@@ -1008,11 +1043,11 @@ static void *ftl_thread(void *arg)
                 femu_err("In FTL.c :937 fdpssd->sp.enable_gc_delay=false, to inhoinno");
             switch (req->cmd.opcode) {
             case NVME_CMD_WRITE:
-                lat = ssd_write(fdpssd, req);
+                lat = fdpssd_write(fdpssd, req);
                 //lat += 100000000; //IT WORKS AT CQ 1mil ms=100 000sec us=100sec ns=0.1sec
                 break;
             case NVME_CMD_READ:
-                lat = ssd_read(fdpssd, req);
+                lat = fdpssd_read(fdpssd, req);
                 //lat += 100000000; //IT WORKS AT CQ 1mil ms=100 000sec us=100sec ns=0.1sec
 
                 break;
@@ -1032,10 +1067,11 @@ static void *ftl_thread(void *arg)
                 ftl_err("FTL to_poller enqueue failed\n");
             }
 
-            /* clean one line if needed (in the background) */
-            if (should_gc(fdpssd)) {
-                femu_err("In ftl.c:965 gc processed, to Inhoinno\n");
-                do_gc(fdpssd, false);
+            for(int rg_id = 0; rg_id < fdpssd->sp.fdp.nrg; ++rg_id){
+                if (should_gc(fdpssd, rg_id)) {
+                    femu_err("In ftl.c:965 gc processed, to Inhoinno\n");
+                    do_gc(fdpssd, rg_id, false);
+                }
             }
         }
     }

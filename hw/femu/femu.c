@@ -349,6 +349,7 @@ static void nvme_ns_init_identify(FemuCtrl *n, NvmeIdNs *id_ns)
 static int nvme_init_namespace(FemuCtrl *n, NvmeNamespace *ns, Error **errp)
 {
     NvmeIdNs *id_ns = &ns->id_ns;
+    NvmeRuHandle *ruh;
     uint64_t num_blks;
     int lba_index;
 
@@ -363,7 +364,19 @@ static int nvme_init_namespace(FemuCtrl *n, NvmeNamespace *ns, Error **errp)
     ns->ns_blks = ns_blks(ns, lba_index);
     ns->util = bitmap_new(num_blks);
     ns->uncorrectable = bitmap_new(num_blks);
+    
+    /* solesie: FEMU only supports 1 namesapce now */
     ns->endgrp = n->endgrp;
+    ns->fdp.nphs = n->fdp_params.nruh;
+    ns->fdp.phs = g_malloc0(n->fdp_params.nruh);
+    for(uint16_t i = 0; i < n->fdp_params.nruh; ++i){
+        ns->fdp.phs[i] = i;
+
+        ruh = &n->endgrp->fdp.ruhs[i];
+        ruh->ruha = NVME_RUHA_HOST;
+        ruh->lbafi = lba_index;
+        ruh->ruamw = n->endgrp->fdp.runs >> (id_ns->lbaf[lba_index].lbads);
+    }
 
     return 0;
 }
@@ -468,18 +481,6 @@ static void nvme_init_ctrl(FemuCtrl *n)
     n->bar.vs = NVME_SPEC_VER;
     n->bar.intmc = n->bar.intms = 0;
     n->temperature = NVME_TEMPERATURE;
-}
-
-static void nvme_init_endgrp(FemuCtrl *n)
-{
-    NvmeEnduranceGroup *endgrp = n->endgrp;
-    
-    if(FDPSSD(n)){
-        endgrp->fdp.enabled = true;
-    }
-
-    endgrp->ctrl = n;
-    endgrp->namespaces = n->namespaces;
 }
 
 static void nvme_init_cmb(FemuCtrl *n)
@@ -767,14 +768,14 @@ static Property femu_props[] = {
     DEFINE_PROP_UINT8("lnum_pln", FemuCtrl, oc_params.num_pln, 2),
     DEFINE_PROP_UINT16("lmetasize", FemuCtrl, oc_params.sos, 16),
 
-    DEFINE_PROP_SIZE("runs", FemuCtrl, fdp_params.runs, 134217728), /* in Bytes */
-    DEFINE_PROP_INT32("nrg", FemuCtrl, fdp_params.nrg, 2),
-    DEFINE_PROP_INT32("chs_per_rg", FemuCtrl, fdp_params.chs_per_rg, 4),
+    DEFINE_PROP_SIZE("runs", FemuCtrl, fdp_params.runs, 1073741824), /* in Bytes (1GiB) */
+    DEFINE_PROP_INT32("nrg", FemuCtrl, fdp_params.nrg, 1),
+    DEFINE_PROP_INT32("chs_per_rg", FemuCtrl, fdp_params.chs_per_rg, 8),
     DEFINE_PROP_INT32("ways_per_rg", FemuCtrl, fdp_params.ways_per_rg, 8),
     DEFINE_PROP_INT32("nruh", FemuCtrl, fdp_params.nruh, 8),
 
-    DEFINE_PROP_INT32("secsz", FemuCtrl, conf_params.secsz, 4096),
-    DEFINE_PROP_INT32("secs_per_pg", FemuCtrl, conf_params.secs_per_pg, 4),      // 16kb
+    DEFINE_PROP_INT32("secsz", FemuCtrl, conf_params.secsz, 512),
+    DEFINE_PROP_INT32("secs_per_pg", FemuCtrl, conf_params.secs_per_pg, 32),     // 16kb
     DEFINE_PROP_INT32("pgs_per_blk", FemuCtrl, conf_params.pgs_per_blk, 256),    // 4mb
     DEFINE_PROP_INT32("pls_per_lun", FemuCtrl, conf_params.pls_per_lun, 1),
     DEFINE_PROP_INT32("luns_per_ch", FemuCtrl, conf_params.luns_per_ch, 8),      // 8way
